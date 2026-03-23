@@ -218,8 +218,9 @@ class TestRunAnalysis:
     @patch("src.ai.claude_analyzer.run_claude_analysis_sdk", return_value="SDK result")
     @patch("src.ai.claude_analyzer.run_claude_analysis", return_value="CLI result")
     def test_auto_uses_tool_use_first(self, mock_cli, mock_sdk, mock_stream, mock_tool):
-        result = run_analysis("prompt", backend="auto")
+        result, backend = run_analysis("prompt", backend="auto")
         assert result == {"approved": ["AAPL"]}
+        assert backend == "tool_use"
         mock_tool.assert_called_once()
         mock_stream.assert_not_called()
         mock_sdk.assert_not_called()
@@ -230,8 +231,9 @@ class TestRunAnalysis:
     @patch("src.ai.claude_analyzer.run_claude_analysis_sdk", return_value=None)
     @patch("src.ai.claude_analyzer.run_claude_analysis", return_value="CLI result")
     def test_auto_fallback_to_streaming(self, mock_cli, mock_sdk, mock_stream, mock_tool):
-        result = run_analysis("prompt", backend="auto")
+        result, backend = run_analysis("prompt", backend="auto")
         assert result == "Streamed text"
+        assert backend == "streaming"
         mock_tool.assert_called_once()
         mock_stream.assert_called_once()
         mock_sdk.assert_not_called()
@@ -241,16 +243,18 @@ class TestRunAnalysis:
     @patch("src.ai.claude_analyzer.run_claude_analysis_sdk", return_value="SDK result")
     @patch("src.ai.claude_analyzer.run_claude_analysis", return_value="CLI result")
     def test_auto_fallback_to_sdk(self, mock_cli, mock_sdk, mock_stream, mock_tool):
-        result = run_analysis("prompt", backend="auto")
+        result, backend = run_analysis("prompt", backend="auto")
         assert result == "SDK result"
+        assert backend == "sdk"
 
     @patch("src.ai.claude_analyzer.run_claude_analysis_with_tools", return_value=None)
     @patch("src.ai.claude_analyzer.run_claude_analysis_streaming", return_value=None)
     @patch("src.ai.claude_analyzer.run_claude_analysis_sdk", return_value=None)
     @patch("src.ai.claude_analyzer.run_claude_analysis", return_value="CLI result")
     def test_auto_fallback_to_cli(self, mock_cli, mock_sdk, mock_stream, mock_tool):
-        result = run_analysis("prompt", backend="auto")
+        result, backend = run_analysis("prompt", backend="auto")
         assert result == "CLI result"
+        assert backend == "cli"
         mock_cli.assert_called_once()
 
     @patch("src.ai.claude_analyzer.run_claude_analysis_with_tools", return_value=None)
@@ -258,8 +262,9 @@ class TestRunAnalysis:
     @patch("src.ai.claude_analyzer.run_claude_analysis_sdk", return_value=None)
     @patch("src.ai.claude_analyzer.run_claude_analysis", return_value="CLI result")
     def test_sdk_only_no_fallback(self, mock_cli, mock_sdk, mock_stream, mock_tool):
-        result = run_analysis("prompt", backend="sdk")
+        result, backend = run_analysis("prompt", backend="sdk")
         assert result is None
+        assert backend == "failed"
         mock_cli.assert_not_called()
 
     @patch("src.ai.claude_analyzer.run_claude_analysis_with_tools", return_value=None)
@@ -267,8 +272,9 @@ class TestRunAnalysis:
     @patch("src.ai.claude_analyzer.run_claude_analysis_sdk", return_value=None)
     @patch("src.ai.claude_analyzer.run_claude_analysis", return_value="CLI result")
     def test_cli_backend(self, mock_cli, mock_sdk, mock_stream, mock_tool):
-        result = run_analysis("prompt", backend="cli")
+        result, backend = run_analysis("prompt", backend="cli")
         assert result == "CLI result"
+        assert backend == "cli"
         mock_tool.assert_not_called()
         mock_sdk.assert_not_called()
 
@@ -350,8 +356,9 @@ class TestToolUse:
              patch("src.ai.claude_analyzer.run_claude_analysis_streaming", return_value=None), \
              patch("src.ai.claude_analyzer.run_claude_analysis_sdk", return_value="SDK text"), \
              patch("src.ai.claude_analyzer.run_claude_analysis", return_value=None):
-            result = run_analysis("prompt", backend="auto")
+            result, backend = run_analysis("prompt", backend="auto")
             assert result == "SDK text"
+            assert backend == "sdk"
             assert isinstance(result, str)
 
     def test_tool_use_fallback_to_cli(self):
@@ -360,13 +367,15 @@ class TestToolUse:
              patch("src.ai.claude_analyzer.run_claude_analysis_streaming", return_value=None), \
              patch("src.ai.claude_analyzer.run_claude_analysis_sdk", return_value=None), \
              patch("src.ai.claude_analyzer.run_claude_analysis", return_value="CLI text"):
-            result = run_analysis("prompt", backend="auto")
+            result, backend = run_analysis("prompt", backend="auto")
             assert result == "CLI text"
+            assert backend == "cli"
 
     def test_run_analysis_with_model_param(self):
         """model 파라미터가 Tool Use에 전달되는지 확인."""
         with patch("src.ai.claude_analyzer.run_claude_analysis_with_tools", return_value={"approved": []}) as mock_tool:
-            run_analysis("prompt", model="claude-opus-4-20250514")
+            result, backend = run_analysis("prompt", model="claude-opus-4-20250514")
+            assert backend == "tool_use"
             mock_tool.assert_called_once_with("prompt", 300, "claude-opus-4-20250514")
 
 

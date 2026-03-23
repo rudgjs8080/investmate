@@ -70,6 +70,12 @@ class DailyPipeline:
 
     def run(self, step: int | None = None, force: bool = False) -> None:
         """전체 파이프라인 또는 특정 단계를 실행한다."""
+        import json as _json
+        from pathlib import Path
+
+        pipeline_start = datetime.now()
+        step_results: dict[str, dict] = {}
+
         with get_session(self.engine) as session:
             ensure_date_ids(session, [self.target_date])
 
@@ -119,6 +125,7 @@ class DailyPipeline:
 
             if not force and self._is_step_done(name):
                 console.print(f"  [dim]STEP {num} {name} -- 이미 완료, 스킵[/dim]")
+                step_results[name] = {"status": "skipped", "records": 0, "duration_sec": 0}
                 continue
 
             started = datetime.now()
@@ -127,10 +134,39 @@ class DailyPipeline:
                 records = fn()
                 self._log_step(name, "success", started, records_count=records or 0)
                 console.print(f"  [green]완료[/green] ({records or 0}건)")
+                step_results[name] = {
+                    "status": "success",
+                    "records": records or 0,
+                    "duration_sec": int((datetime.now() - started).total_seconds()),
+                }
             except Exception as e:
                 logger.error("STEP %d 실패: %s", num, e, exc_info=True)
                 self._log_step(name, "failed", started, message=str(e))
                 console.print(f"  [red]실패: {e}[/red]")
+                step_results[name] = {
+                    "status": "failed",
+                    "records": 0,
+                    "duration_sec": int((datetime.now() - started).total_seconds()),
+                }
+
+        # 파이프라인 전체 요약
+        pipeline_end = datetime.now()
+        total_elapsed = int((pipeline_end - pipeline_start).total_seconds())
+
+        summary = {
+            "date": str(self.target_date),
+            "total_duration_sec": total_elapsed,
+            "steps": step_results,
+        }
+
+        summary_path = Path("logs") / f"{self.target_date}_summary.json"
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with open(summary_path, "w", encoding="utf-8") as f:
+                _json.dump(summary, f, ensure_ascii=False, indent=2)
+            logger.info("파이프라인 요약 저장: %s", summary_path)
+        except Exception:
+            pass
 
         console.print(f"\n[bold green]파이프라인 완료[/bold green] ({self.target_date})")
 
@@ -659,6 +695,12 @@ class DailyPipeline:
 
         CLI 미설치 시 프롬프트만 저장하고 ai_approved=None 유지.
         """
+        settings = get_settings()
+        if not settings.ai_enabled:
+            logger.info("AI 분석 비활성화 (INVESTMATE_AI_ENABLED=false)")
+            console.print("  [dim]AI 분석 비활성화됨[/dim]")
+            return 0
+
         from src.ai.claude_analyzer import (
             is_claude_available,
             parse_ai_response,
@@ -684,13 +726,14 @@ class DailyPipeline:
         # 캐시 확인
         from src.ai.cache import get_cached_response, save_cached_response
         cached = get_cached_response(self.target_date, prompt)
+        ai_backend = "cached"
         if cached:
             console.print("  [dim]AI 캐시 히트 -- 이전 분석 결과 재사용[/dim]")
             response: dict | str | None = cached
         else:
             # Round 1: Tool Use -> SDK -> CLI 순으로 시도
             console.print("  [dim]AI Round 1: 스크리닝 분석 중...[/dim]")
-            response = run_analysis(
+            response, ai_backend = run_analysis(
                 prompt,
                 timeout=settings.ai_timeout,
                 model=settings.ai_model_analysis,
@@ -698,10 +741,12 @@ class DailyPipeline:
         if response is None:
             console.print("  [yellow]AI Round 1 실패, 재시도 중...[/yellow]")
             # 재시도: 간소화된 프롬프트 (상위 5개만)
-            response = run_analysis(prompt[:len(prompt) // 2], timeout=180)
+            response, ai_backend = run_analysis(prompt[:len(prompt) // 2], timeout=180)
             if response is None:
                 console.print("  [red]AI 분석 실패 -- 프롬프트만 저장됨[/red]")
                 return 0
+
+        logger.info("AI 백엔드: %s", ai_backend)
 
         # Tool Use dict인 경우 파싱 불필요
         if isinstance(response, dict):
@@ -862,7 +907,7 @@ class DailyPipeline:
                     dd_report = _assemble(session, self.target_date, self.run_date_id)
                 dd_prompt = build_deep_dive_prompt(approved_tickers, dd_report)
                 console.print(f"  [dim]AI Round 2: 딥다이브 분석 ({len(approved_tickers)}종목)...[/dim]")
-                dd_response = run_analysis(dd_prompt, timeout=180)
+                dd_response, _ = run_analysis(dd_prompt, timeout=180)
                 dd_parsed: list[dict] = []
                 dd_text_response: str | None = None
                 if isinstance(dd_response, dict):

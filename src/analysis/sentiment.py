@@ -56,9 +56,10 @@ def _call_llm(prompt: str) -> str | None:
     try:
         from src.ai.claude_analyzer import run_analysis
         from src.config import get_settings
-        return run_analysis(
+        response, _ = run_analysis(
             prompt, timeout=60, model=get_settings().ai_model_sentiment,
         )
+        return response
     except Exception as e:
         logger.warning("LLM 감성 분석 실패: %s", e)
         return None

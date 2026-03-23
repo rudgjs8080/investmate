@@ -208,37 +208,39 @@ def run_analysis(
     timeout: int = AI_TIMEOUT,
     backend: str = "auto",
     model: str | None = None,
-) -> dict | str | None:
+) -> tuple[dict | str | None, str]:
     """AI 분석을 실행한다. Tool Use -> SDK 스트리밍 -> SDK 일반 -> CLI 순으로 시도.
 
     Returns:
-        dict -- Tool Use 성공 (파싱 불필요)
-        str  -- 텍스트 응답 (파싱 필요)
-        None -- 모든 방법 실패
+        (response, backend_used) tuple.
+        response: dict (Tool Use) | str (text) | None (failed)
+        backend_used: "tool_use" | "streaming" | "sdk" | "cli" | "failed"
     """
     if backend in ("auto", "sdk"):
         # 1순위: Tool Use (구조화 보장)
         result = run_claude_analysis_with_tools(prompt, timeout, model)
         if result:
-            return result
+            return result, "tool_use"
 
         # 2순위: SDK 스트리밍
         text = run_claude_analysis_streaming(prompt, timeout, model)
         if text:
-            return text
+            return text, "streaming"
 
         # 3순위: SDK 일반
         text = run_claude_analysis_sdk(prompt, timeout, model)
         if text:
-            return text
+            return text, "sdk"
 
         if backend == "sdk":
-            return None  # SDK only mode, no fallback
+            return None, "failed"  # SDK only mode, no fallback
 
     if backend in ("auto", "cli"):
-        return run_claude_analysis(prompt, timeout)
+        cli_result = run_claude_analysis(prompt, timeout)
+        if cli_result:
+            return cli_result, "cli"
 
-    return None
+    return None, "failed"
 
 
 def run_claude_analysis(prompt: str, timeout: int = AI_TIMEOUT) -> str | None:
