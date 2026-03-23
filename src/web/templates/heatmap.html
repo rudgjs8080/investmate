@@ -47,15 +47,28 @@ function loadHeatmap(period) {
         if (!heatmapChart) heatmapChart = initChart('heatmapChart');
         if (!heatmapChart || !data.sectors.length) return;
 
+        // 수익률 → 색상 변환
+        function retColor(r) {
+            if (r >= 3) return '#16a34a';
+            if (r >= 1.5) return '#22c55e';
+            if (r >= 0.5) return '#4ade80';
+            if (r >= 0) return '#86efac';
+            if (r >= -0.5) return '#fca5a5';
+            if (r >= -1.5) return '#f87171';
+            if (r >= -3) return '#ef4444';
+            return '#dc2626';
+        }
+
         const treeData = data.sectors.map(sector => ({
             name: sector.name,
             children: sector.children.map(s => ({
-                name: s.name,
+                name: s.ticker || s.name,
                 value: s.value,
                 return_pct: s.return_pct,
                 ticker: s.ticker,
                 stock_name: s.stock_name,
                 price: s.price,
+                itemStyle: { color: retColor(s.return_pct) },
             })),
         }));
 
@@ -81,7 +94,7 @@ function loadHeatmap(period) {
                 type: 'treemap',
                 data: treeData,
                 roam: false,
-                nodeClick: 'link',
+                nodeClick: false,
                 breadcrumb: { show: true, top: 4, itemStyle: { color: '#f1f5f9', textStyle: { color: '#64748b', fontSize: 11 } } },
                 levels: [
                     { // 섹터
@@ -90,15 +103,13 @@ function loadHeatmap(period) {
                     },
                     { // 종목
                         itemStyle: { borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)', gapWidth: 1 },
-                        label: { show: true, fontSize: 10, formatter: '{b}', color: '#fff', textShadowColor: 'rgba(0,0,0,0.5)', textShadowBlur: 3 },
-                        colorMappingBy: 'value',
+                        label: { show: true, fontSize: 10, formatter: function(p) { return p.data.ticker ? p.data.ticker + '\n' + (p.data.return_pct > 0 ? '+' : '') + p.data.return_pct + '%' : p.name; }, color: '#fff', textShadowColor: 'rgba(0,0,0,0.5)', textShadowBlur: 3 },
                     },
                 ],
                 visualMin: -5,
                 visualMax: 5,
-                visualDimension: 'return_pct',
                 color: ['#dc2626', '#ef4444', '#f87171', '#fca5a5', '#d1d5db', '#86efac', '#4ade80', '#22c55e', '#16a34a'],
-                leafDepth: 1,
+                leafDepth: 2,
                 label: { show: true },
             }],
             animationDuration: 1000,
