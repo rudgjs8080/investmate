@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}시장 환경{% endblock %}
+
+{% block content %}
+<div class="flex justify-between items-center mb-6">
+    <h1 class="text-2xl font-bold">시장 환경 분석</h1>
+    {% if macro.date %}<p class="text-sm text-gray-400">{{ macro.date }}</p>{% endif %}
+</div>
+
+{% if macro %}
+<!-- 시장 점수 히어로 -->
+<div class="rounded-2xl p-8 text-center mb-6 {% if macro.market_score and macro.market_score >= 7 %}bg-gradient-to-br from-emerald-50 to-green-50 dark:from-emerald-900/20 dark:to-green-900/20{% elif macro.market_score and macro.market_score <= 3 %}bg-gradient-to-br from-red-50 to-rose-50 dark:from-red-900/20 dark:to-rose-900/20{% else %}bg-gradient-to-br from-amber-50 to-yellow-50 dark:from-amber-900/20 dark:to-yellow-900/20{% endif %} border border-gray-100 dark:border-gray-700 shadow-sm">
+    <div class="text-6xl font-black {% if macro.market_score and macro.market_score >= 7 %}text-emerald-500{% elif macro.market_score and macro.market_score <= 3 %}text-red-500{% else %}text-amber-500{% endif %}">
+        {{ macro.market_score or '-' }}<span class="text-xl font-normal text-gray-400">/10</span>
+    </div>
+    <p class="text-base font-semibold mt-2 text-gray-600 dark:text-gray-300">
+        {% if macro.market_score and macro.market_score >= 8 %}강한 상승장 — 적극 매수
+        {% elif macro.market_score and macro.market_score >= 6 %}안정적 시장 — 선별 매수
+        {% elif macro.market_score and macro.market_score >= 4 %}중립 — 신중한 접근
+        {% elif macro.market_score and macro.market_score >= 2 %}약세 — 현금 비중 확대
+        {% else %}극단적 약세 — 방어 전략{% endif %}
+    </p>
+</div>
+
+<!-- KPI -->
+<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+    {% for label, value, extra in [
+        ('VIX', ("%.1f"|format(macro.vix) if macro.vix else '-'), None),
+        ('S&P 500', ("{:,.0f}".format(macro.sp500) if macro.sp500 else '-'), ("SMA20 {:,.0f}".format(macro.sp500_sma20) if macro.sp500_sma20 else None)),
+        ('10Y 금리', ("%.2f%%"|format(macro.yield_10y) if macro.yield_10y else '-'), None),
+        ('달러 인덱스', ("%.1f"|format(macro.dollar) if macro.dollar else '-'), None),
+    ] %}
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 text-center">
+        <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold mb-1">{{ label }}</div>
+        <div class="text-2xl font-bold">{{ value }}</div>
+        {% if extra %}<p class="text-xs text-gray-400 mt-1">{{ extra }}</p>{% endif %}
+    </div>
+    {% endfor %}
+</div>
+
+<!-- 차트 2x2 -->
+<div class="grid md:grid-cols-2 gap-4 mb-5">
+    {% for id, title in [('vixChart', 'VIX 추이 (3년)'), ('sp500Chart', 'S&P 500 추이 (3년)')] %}
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4">
+        <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">{{ title }}</div>
+        <div id="{{ id }}" style="height:260px"></div>
+    </div>
+    {% endfor %}
+</div>
+<div class="grid md:grid-cols-2 gap-4">
+    {% for id, title in [('yieldChart', '10Y 금리 추이 (3년)'), ('dollarChart', '달러 인덱스 추이 (3년)')] %}
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4">
+        <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">{{ title }}</div>
+        <div id="{{ id }}" style="height:260px"></div>
+    </div>
+    {% endfor %}
+</div>
+
+{% else %}
+<div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border p-12 text-center">
+    <div class="text-5xl mb-4">🌍</div>
+    <h3 class="text-lg font-semibold">매크로 데이터가 없습니다</h3>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if macro %}
+<script>
+fetch('/api/macro-history?days=1095').then(r=>r.json()).then(d => {
+    const mk = (id, vals, color) => { const c = initChart(id); if (c && vals) c.setOption(lineChartOption(d.labels, vals, color, { dataZoom: true })); };
+    mk('vixChart', d.vix, COLORS.red);
+    mk('sp500Chart', d.sp500, COLORS.blue);
+    mk('yieldChart', d.yield_10y, COLORS.orange);
+    mk('dollarChart', d.dollar, COLORS.green);
+}).catch(e => console.error(e));
+</script>
+{% endif %}
+{% endblock %}

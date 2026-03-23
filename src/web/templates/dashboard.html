@@ -1,0 +1,237 @@
+{% extends "base.html" %}
+{% block title %}대시보드{% endblock %}
+
+{% block content %}
+<!-- 페이지 헤더 -->
+<div class="flex justify-between items-center mb-6">
+    <div>
+        <h1 class="text-2xl font-bold">투자 리포트</h1>
+        <p class="text-sm text-gray-400">{% if date %}{{ date }}{% endif %} | S&P 500 분석</p>
+    </div>
+    {% if date %}
+    <div class="flex gap-2">
+        <a href="/api/export/recommendations?report_date={{ date }}" class="text-sm px-3 py-2 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 transition">📥 CSV</a>
+        <a href="/recommendations/{{ date }}" class="text-sm px-4 py-2 rounded-lg border border-indigo-500 text-indigo-500 hover:bg-indigo-500 hover:text-white transition">상세 분석 →</a>
+    </div>
+    {% endif %}
+</div>
+
+{% if recommendations %}
+<!-- 30초 브리핑 -->
+<div class="mb-6 rounded-xl overflow-hidden shadow-sm border border-gray-100 dark:border-gray-700
+    {% if market_score and market_score >= 7 %}bg-gradient-to-r from-emerald-50 to-cyan-50 dark:from-emerald-900/20 dark:to-cyan-900/20
+    {% elif market_score and market_score <= 3 %}bg-gradient-to-r from-red-50 to-orange-50 dark:from-red-900/20 dark:to-orange-900/20
+    {% else %}bg-gradient-to-r from-gray-50 to-blue-50 dark:from-gray-800 dark:to-blue-900/20{% endif %}">
+    <div class="p-5">
+        <h2 class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-3">오늘의 브리핑</h2>
+        <div class="grid md:grid-cols-3 gap-4">
+            <!-- 시장 분위기 -->
+            <div>
+                <div class="text-2xl font-black mb-1">{{ market_mood or '분석 중' }}</div>
+                <p class="text-sm text-gray-500 dark:text-gray-400">시장 점수 {{ market_score or '-' }}/10</p>
+            </div>
+            <!-- TOP 3 추천 -->
+            <div>
+                <div class="text-xs font-semibold text-gray-400 mb-2">TOP 3 추천</div>
+                {% for rec in recommendations[:3] %}
+                <div class="flex items-center gap-2 mb-1">
+                    <a href="/stock/{{ rec.ticker }}" class="font-bold text-blue-500 hover:underline text-sm">{{ rec.ticker }}</a>
+                    <span class="text-xs text-gray-400">{{ "%.1f"|format(rec.total_score) }}점</span>
+                </div>
+                {% endfor %}
+            </div>
+            <!-- 시그널 카운트 -->
+            <div>
+                <div class="text-xs font-semibold text-gray-400 mb-2">시그널</div>
+                <div class="flex gap-4">
+                    <div><span class="text-emerald-500 font-bold text-lg">{{ buy_signal_count or 0 }}</span><span class="text-xs text-gray-400 ml-1">매수</span></div>
+                    <div><span class="text-red-500 font-bold text-lg">{{ sell_signal_count or 0 }}</span><span class="text-xs text-gray-400 ml-1">매도</span></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% if macro %}
+<!-- KPI 스트립 -->
+<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 text-center">
+        <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold mb-1">시장 점수</div>
+        <div class="text-3xl font-black {% if macro.market_score and macro.market_score >= 7 %}text-emerald-500{% elif macro.market_score and macro.market_score <= 3 %}text-red-500{% else %}text-amber-500{% endif %}">
+            {{ macro.market_score or '-' }}<span class="text-sm font-normal text-gray-400">/10</span>
+        </div>
+    </div>
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 text-center">
+        <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold mb-1">VIX</div>
+        <div class="text-2xl font-bold">{{ "%.1f"|format(macro.vix) if macro.vix else '-' }}</div>
+        <span class="inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold mt-1 {% if macro.vix and macro.vix > 25 %}bg-red-100 text-red-700{% elif macro.vix and macro.vix < 20 %}bg-emerald-100 text-emerald-700{% else %}bg-amber-100 text-amber-700{% endif %}">
+            {% if macro.vix and macro.vix > 30 %}공포{% elif macro.vix and macro.vix > 25 %}주의{% elif macro.vix and macro.vix < 20 %}안정{% else %}보통{% endif %}
+        </span>
+    </div>
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 text-center">
+        <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold mb-1">S&P 500</div>
+        <div class="text-2xl font-bold">{{ "{:,.0f}".format(macro.sp500) if macro.sp500 else '-' }}</div>
+    </div>
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 text-center">
+        <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold mb-1">10Y 금리</div>
+        <div class="text-2xl font-bold">{{ "%.2f"|format(macro.yield_10y) if macro.yield_10y else '-' }}%</div>
+    </div>
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 text-center">
+        <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold mb-1">달러</div>
+        <div class="text-2xl font-bold">{{ "%.1f"|format(macro.dollar) if macro.dollar else '-' }}</div>
+    </div>
+</div>
+{% endif %}
+
+{% if recommendations %}
+<!-- 메인 2컬럼 -->
+<div class="grid lg:grid-cols-3 gap-5">
+    <!-- 좌: 종목 + 차트 (2/3) -->
+    <div class="lg:col-span-2 space-y-5">
+        <!-- 종목 리스트 -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
+            <div class="px-5 py-3 border-b border-gray-100 dark:border-gray-700">
+                <div class="flex justify-between items-center">
+                    <span class="text-xs uppercase tracking-widest text-gray-400 font-semibold">추천 종목 TOP {{ recommendations|length }}</span>
+                    {% set ai_count = recommendations | selectattr('ai_approved', 'equalto', true) | list | length %}
+                    {% if ai_count > 0 %}
+                    <span class="inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">AI 추천 {{ ai_count }}개</span>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="divide-y divide-gray-50 dark:divide-gray-700">
+            {% for rec in recommendations %}
+                <a href="/stock/{{ rec.ticker }}" class="grid grid-cols-[30px_1fr_60px_60px_60px_40px_55px] items-center gap-2 px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition no-underline text-inherit">
+                    <span class="text-xs font-bold text-gray-300 text-center">{{ rec.rank }}</span>
+                    <div class="min-w-0">
+                        <div class="text-sm font-semibold truncate">{{ rec.ticker }}</div>
+                        <div class="text-[11px] text-gray-400 truncate">{{ rec.name_kr or rec.name }}</div>
+                    </div>
+                    <div class="text-xs text-gray-400 text-right">{{ rec.sector[:6] if rec.sector else '' }}</div>
+                    <div id="spark-{{ rec.ticker }}" style="width:60px;height:24px"></div>
+                    <div class="text-sm text-right tabular-nums">${{ "{:,.0f}".format(rec.price) }}</div>
+                    <div class="text-sm font-bold text-center {% if rec.total_score >= 7 %}text-emerald-500{% elif rec.total_score >= 5.5 %}text-blue-500{% else %}text-amber-500{% endif %}">{{ "%.1f"|format(rec.total_score) }}</div>
+                    <div class="text-center">
+                        {% if rec.ai_approved is true %}
+                            <span class="inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-700">AI {{ rec.ai_confidence or '' }}</span>
+                        {% elif rec.ai_approved is false %}
+                            <span class="inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-100 text-red-700">제외</span>
+                        {% else %}
+                            <span class="text-gray-300 text-xs">-</span>
+                        {% endif %}
+                    </div>
+                </a>
+            {% endfor %}
+            </div>
+        </div>
+
+        <!-- 차트 2x2 -->
+        <div class="grid grid-cols-2 gap-4">
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4">
+                <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">누적 수익률 (90일)</div>
+                <div id="equityChart" style="height:200px"></div>
+            </div>
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4">
+                <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">VIX 추이</div>
+                <div id="vixMini" style="height:200px"></div>
+            </div>
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4">
+                <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">S&P 500 추이</div>
+                <div id="sp500Mini" style="height:200px"></div>
+            </div>
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4">
+                <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">최고/최저 종목</div>
+                <div id="topWorstMini" style="height:200px"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 우: 사이드바 (1/3) -->
+    <div class="space-y-5">
+        {% if sector_counts %}
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4">
+            <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">섹터 분포</div>
+            <div id="sectorChart" style="height:230px"></div>
+        </div>
+        {% endif %}
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4">
+            <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">평균 점수 분포</div>
+            <div id="avgRadar" style="height:230px"></div>
+        </div>
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4">
+            <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">기간별 승률</div>
+            <div id="winRateMini" style="height:180px"></div>
+        </div>
+    </div>
+</div>
+
+{% else %}
+<div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border p-8 text-center text-gray-400">
+    <div class="text-5xl mb-4">📊</div>
+    <h3 class="text-lg font-semibold mb-2">아직 추천 데이터가 없습니다</h3>
+    <p class="text-sm text-gray-400"><code class="bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded text-xs">investmate run</code>을 실행하세요</p>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+const chartOpts = { responsive: true, plugins: { legend: { display: false }}, maintainAspectRatio: true };
+
+{% if sector_counts %}
+const sc = initChart('sectorChart');
+if (sc) sc.setOption(pieChartOption({{ sector_counts.keys() | list | tojson }}, {{ sector_counts.values() | list | tojson }}, { ring: true }));
+{% endif %}
+
+fetch('/api/equity-curve?days=1095').then(r=>r.json()).then(d => {
+    const c = initChart('equityChart');
+    if (c && d.labels.length) c.setOption(lineChartOption(d.labels, d.values, COLORS.blue, { dataZoom: true }));
+});
+
+fetch('/api/macro-history?days=1095').then(r=>r.json()).then(d => {
+    const v = initChart('vixMini');
+    if (v && d.vix) v.setOption(lineChartOption(d.labels, d.vix, COLORS.red, { dataZoom: true }));
+    const s = initChart('sp500Mini');
+    if (s && d.sp500) s.setOption(lineChartOption(d.labels, d.sp500, COLORS.green, { dataZoom: true }));
+});
+
+fetch('/api/top-worst-picks?n=3&days=365').then(r=>r.json()).then(d => {
+    const c = initChart('topWorstMini');
+    if (!c) return;
+    const labels = [...d.top.map(x=>x.ticker), ...d.worst.map(x=>x.ticker)];
+    const values = [...d.top.map(x=>x.return), ...d.worst.map(x=>x.return)];
+    const colors = values.map(v => v > 0 ? COLORS.green : COLORS.red);
+    c.setOption(barChartOption(labels, values, colors, { horizontal: true }));
+});
+
+fetch('/api/win-rates?days=365').then(r=>r.json()).then(d => {
+    const c = initChart('winRateMini');
+    if (c) c.setOption(barChartOption(['1일','5일','10일','20일'], [d['1d']||0, d['5d']||0, d['10d']||0, d['20d']||0], [COLORS.cyan, COLORS.blue, COLORS.primary, COLORS.purple], { yMax: 100 }));
+});
+
+{% if recommendations %}
+const recs = {{ recommendations | tojson }};
+const avg = (k) => +(recs.reduce((s,r)=>s+r[k],0)/recs.length).toFixed(1);
+const rc = initChart('avgRadar');
+if (rc) rc.setOption(radarChartOption(['기술','기본','수급','외부','모멘텀'], [avg('technical_score'), avg('fundamental_score'), avg('smart_money_score'), avg('external_score'), avg('momentum_score')], COLORS.primary));
+
+// 스파크라인 로드
+{% for rec in recommendations %}
+fetch('/api/sparkline/{{ rec.ticker }}?days=5').then(r=>r.json()).then(d => {
+    if (!d.prices.length) return;
+    const el = document.getElementById('spark-{{ rec.ticker }}');
+    if (!el) return;
+    const chart = echarts.init(el);
+    const color = d.prices[d.prices.length-1] >= d.prices[0] ? '#10b981' : '#ef4444';
+    chart.setOption({
+        grid: {top:0,right:0,bottom:0,left:0},
+        xAxis: {show:false, type:'category', data: d.prices.map((_,i)=>i)},
+        yAxis: {show:false, type:'value', min:'dataMin', max:'dataMax'},
+        series: [{type:'line', data:d.prices, smooth:true, showSymbol:false, lineStyle:{width:1.5,color:color}, areaStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,colorStops:[{offset:0,color:color+'40'},{offset:1,color:color+'05'}]}}}]
+    });
+});
+{% endfor %}
+{% endif %}
+</script>
+{% endblock %}

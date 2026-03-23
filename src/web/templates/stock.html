@@ -1,0 +1,240 @@
+{% extends "base.html" %}
+{% block title %}{{ stock.name_kr if stock else '종목' }}{% endblock %}
+
+{% block content %}
+{% if error %}
+<div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-8 text-center">
+    <div class="text-5xl mb-4">🔍</div>
+    <h3 class="text-lg font-semibold mb-2">{{ error }}</h3>
+    <a href="/" class="text-blue-500 hover:underline text-sm">← 대시보드로 돌아가기</a>
+</div>
+{% elif stock %}
+
+<!-- 브레드크럼 -->
+<nav class="text-sm text-gray-400 mb-4">
+    <a href="/" class="hover:text-gray-600 dark:hover:text-gray-300">대시보드</a>
+    <span class="mx-1">›</span>
+    <span class="text-gray-600 dark:text-gray-300">{{ stock.ticker }}</span>
+</nav>
+
+<!-- 헤더 -->
+<div class="flex justify-between items-start mb-5">
+    <div>
+        <h1 class="text-2xl font-bold">{{ stock.name_kr }} <span class="text-base font-normal text-gray-400">{{ stock.ticker }}</span></h1>
+        <p class="text-sm text-gray-400">{{ stock.name }} · {{ stock.sector }}</p>
+    </div>
+    {% if stock.price %}
+    <div class="text-right">
+        <div class="text-3xl font-black tabular-nums">${{ "{:,.2f}".format(stock.price) }}</div>
+        {% if stock.market_cap %}
+        <p class="text-xs text-gray-400 mt-1">시총 ${{ "{:,.1f}B".format(stock.market_cap / 1e9) if stock.market_cap and stock.market_cap > 1e9 else "{:,.0f}M".format(stock.market_cap / 1e6) if stock.market_cap else '-' }}</p>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+
+<!-- AI 설명 -->
+{% if explanation %}
+<div class="bg-gradient-to-r from-indigo-50 to-blue-50 dark:from-indigo-900/20 dark:to-blue-900/20 border-l-4 border-indigo-500 rounded-r-xl p-4 mb-5">
+    <p class="font-semibold text-sm">{{ explanation.headline }}</p>
+    <p class="text-sm text-gray-600 dark:text-gray-300 mt-1">{{ explanation.why }}</p>
+    {% if explanation.risk %}
+    <p class="text-xs text-red-500 mt-2">⚠ {{ explanation.risk }}</p>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- 캔들스틱 차트 -->
+<div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 mb-5">
+    <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">가격 차트 (3년) + 이동평균선</div>
+    <div id="priceChart" role="img" aria-label="가격 캔들스틱 차트" style="height:420px"></div>
+</div>
+
+<!-- KPI 카드 -->
+<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-5">
+    {% set kpis = [
+        ('PER', stock.per, "%.1f"|format(stock.per) if stock.per else '-', '주가수익비율. 기업 이익 대비 주가가 비싼지 저렴한지 보여줘요. 낮을수록 저평가.'),
+        ('PBR', stock.pbr, "%.1f"|format(stock.pbr) if stock.pbr else '-', '주가순자산비율. 기업 순자산 대비 주가 수준. 1 미만이면 자산가치보다 주가가 낮음.'),
+        ('ROE', stock.roe, ("%.1f%%"|format(stock.roe * 100) if stock.roe and stock.roe < 1 else ("%.1f%%"|format(stock.roe) if stock.roe else '-')), '자기자본이익률. 투자한 돈으로 얼마나 수익을 내는지. 15% 이상이면 우수.'),
+        ('배당', stock.dividend_yield, ("%.2f%%"|format(stock.dividend_yield * 100) if stock.dividend_yield and stock.dividend_yield < 1 else '-'), '배당수익률. 주가 대비 연간 배당금 비율.'),
+        ('부채', stock.debt_ratio, ("%.0f%%"|format(stock.debt_ratio * 100) if stock.debt_ratio else '-'), '부채비율. 총자산 대비 부채. 70% 이상이면 주의.'),
+    ] %}
+    {% for label, val, display, tip in kpis %}
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 text-center">
+        <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold mb-1">{{ label }} <button type="button" class="inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full bg-gray-200 dark:bg-gray-600 text-gray-500 dark:text-gray-300 cursor-help" title="{{ tip }}" aria-label="도움말">?</button></div>
+        <div class="text-2xl font-bold">{{ display }}</div>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- 시그널 + 수급 -->
+<div class="grid md:grid-cols-2 gap-4 mb-5">
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4">
+        <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-3">활성 시그널</div>
+        {% if signals %}
+        <div class="flex flex-wrap gap-2">
+            {% for s in signals %}
+            <span class="inline-flex px-3 py-1 rounded-full text-xs font-semibold {% if s.direction == 'BUY' %}bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400{% else %}bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400{% endif %}">
+                {{ s.name_kr }} ({{ s.strength }}/10)
+            </span>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-sm text-gray-400">현재 활성 시그널 없음</p>
+        {% endif %}
+    </div>
+
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4">
+        <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-3">수급/스마트머니</div>
+        {% if smart_money.analyst %}
+        <div class="mb-3">
+            <p class="text-xs text-gray-400 mb-1">애널리스트 ({{ smart_money.analyst.total }}명)</p>
+            <div class="flex gap-2">
+                <span class="inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-700">Buy {{ smart_money.analyst.buy }}</span>
+                <span class="inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-700">Hold {{ smart_money.analyst.hold }}</span>
+                <span class="inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-100 text-red-700">Sell {{ smart_money.analyst.sell }}</span>
+            </div>
+            {% if smart_money.analyst.target_mean %}
+            <p class="text-xs text-gray-400 mt-1">목표가: ${{ "{:,.0f}".format(smart_money.analyst.target_mean) }}</p>
+            {% endif %}
+        </div>
+        {% endif %}
+        {% if smart_money.institutions %}
+        <div class="mb-3">
+            <p class="text-xs text-gray-400 mb-1">주요 기관</p>
+            {% for inst in smart_money.institutions %}
+            <p class="text-sm">{{ inst.name }}{% if inst.value %} — <span class="text-gray-400">${{ "{:,.1f}B".format(inst.value / 1e9) if inst.value and inst.value > 1e9 else "{:,.0f}M".format(inst.value / 1e6) if inst.value else '' }}</span>{% endif %}</p>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% if smart_money.insider %}
+        <p class="text-xs text-gray-400">내부자: 매수 {{ smart_money.insider.buys }} / 매도 {{ smart_money.insider.sells }}</p>
+        {% endif %}
+        {% if not smart_money %}
+        <p class="text-sm text-gray-400">수급 데이터 없음</p>
+        {% endif %}
+    </div>
+</div>
+
+<!-- 뉴스 -->
+{% if news %}
+<div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 mb-5">
+    <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-3">최근 뉴스 ({{ news|length }}건)</div>
+    <div class="divide-y divide-gray-100 dark:divide-gray-700">
+    {% for n in news %}
+    <div class="flex justify-between items-center py-2.5">
+        <div class="min-w-0 flex-1 pr-3">
+            <a href="{{ n.url }}" target="_blank" class="text-sm font-medium hover:text-blue-500 transition block line-clamp-2" title="{{ n.title }}">{{ n.title }}</a>
+            <p class="text-[11px] text-gray-400 mt-0.5">{{ n.source }} · {{ n.published_at or '' }}</p>
+        </div>
+        <div class="flex-shrink-0">
+            {% if n.sentiment > 0.2 %}
+                <span class="inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-700">긍정</span>
+            {% elif n.sentiment < -0.2 %}
+                <span class="inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-100 text-red-700">부정</span>
+            {% else %}
+                <span class="inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold bg-gray-100 text-gray-500">중립</span>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<!-- 점수 추이 -->
+{% if rec_history and rec_history|length > 1 %}
+<div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 mb-5">
+    <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">추천 점수 추이</div>
+    <div id="scoreChart" role="img" aria-label="추천 점수 추이 차트" style="height:200px"></div>
+</div>
+{% endif %}
+
+<!-- 추천 이력 -->
+{% if rec_history %}
+<div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden mb-5">
+    <div class="px-4 py-3 border-b border-gray-100 dark:border-gray-700">
+        <span class="text-xs uppercase tracking-widest text-gray-400 font-semibold">추천 이력 ({{ rec_history|length }}건)</span>
+    </div>
+    <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+        <thead>
+            <tr class="text-[11px] uppercase tracking-wider text-gray-400 border-b border-gray-100 dark:border-gray-700">
+                <th class="px-4 py-2 text-left">날짜</th><th class="px-3 py-2">순위</th><th class="px-3 py-2">점수</th><th class="px-3 py-2">AI</th><th class="px-3 py-2 text-right">1일</th><th class="px-3 py-2 text-right">5일</th><th class="px-3 py-2 text-right">20일</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-50 dark:divide-gray-700">
+        {% for r in rec_history %}
+        <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition">
+            <td class="px-4 py-2 text-gray-400 text-xs">{{ r.date }}</td>
+            <td class="px-3 py-2 text-center">{{ r.rank }}</td>
+            <td class="px-3 py-2 text-center font-bold">{{ "%.1f"|format(r.total_score) }}</td>
+            <td class="px-3 py-2 text-center">
+                {% if r.ai_approved is true %}<span class="inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-700">{{ r.ai_confidence or 'V' }}</span>
+                {% elif r.ai_approved is false %}<span class="inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-100 text-red-700">X</span>
+                {% else %}<span class="text-gray-300">-</span>{% endif %}
+            </td>
+            <td class="px-3 py-2 text-right tabular-nums {% if r.return_1d and r.return_1d > 0 %}text-emerald-500{% elif r.return_1d and r.return_1d < 0 %}text-red-500{% else %}text-gray-300{% endif %}">{% if r.return_1d is not none %}{% if r.return_1d > 0 %}▲{% elif r.return_1d < 0 %}▼{% endif %} {{ "{:+.1f}%".format(r.return_1d) }}{% else %}-{% endif %}</td>
+            <td class="px-3 py-2 text-right tabular-nums {% if r.return_5d and r.return_5d > 0 %}text-emerald-500{% elif r.return_5d and r.return_5d < 0 %}text-red-500{% else %}text-gray-300{% endif %}">{% if r.return_5d is not none %}{% if r.return_5d > 0 %}▲{% elif r.return_5d < 0 %}▼{% endif %} {{ "{:+.1f}%".format(r.return_5d) }}{% else %}-{% endif %}</td>
+            <td class="px-3 py-2 text-right tabular-nums {% if r.return_20d and r.return_20d > 0 %}text-emerald-500{% elif r.return_20d and r.return_20d < 0 %}text-red-500{% else %}text-gray-300{% endif %}">{% if r.return_20d is not none %}{% if r.return_20d > 0 %}▲{% elif r.return_20d < 0 %}▼{% endif %} {{ "{:+.1f}%".format(r.return_20d) }}{% else %}-{% endif %}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+{% endif %}
+
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if stock %}
+<script>
+fetch('/api/stock/{{ stock.ticker }}/prices?days=1095').then(r=>r.json()).then(d => {
+    const c = initChart('priceChart');
+    if (!c || !d.dates.length) return;
+    const ohlc = d.dates.map((dt, i) => [d.open[i], d.close[i], d.low[i], d.high[i]]);
+    const series = [
+        { name: '가격', type: 'candlestick', data: ohlc, xAxisIndex: 0, yAxisIndex: 0,
+          itemStyle: { color: '#ef4444', color0: '#10b981', borderColor: '#ef4444', borderColor0: '#10b981' } },
+        { name: '거래량', type: 'bar', xAxisIndex: 1, yAxisIndex: 1,
+          data: d.volume.map((v, i) => ({ value: v, itemStyle: { color: d.close[i] >= (d.open[i]||d.close[i]) ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)' } })) },
+    ];
+    if (d.sma5 && d.sma5.some(v => v !== null)) series.push({ name: 'SMA 5', type: 'line', data: d.sma5, smooth: true, symbol: 'none', lineStyle: { color: '#f59e0b', width: 1, type: 'dashed' }, xAxisIndex: 0, yAxisIndex: 0 });
+    if (d.sma20 && d.sma20.some(v => v !== null)) series.push({ name: 'SMA 20', type: 'line', data: d.sma20, smooth: true, symbol: 'none', lineStyle: { color: '#3b82f6', width: 1.5 }, xAxisIndex: 0, yAxisIndex: 0 });
+    if (d.sma60 && d.sma60.some(v => v !== null)) series.push({ name: 'SMA 60', type: 'line', data: d.sma60, smooth: true, symbol: 'none', lineStyle: { color: '#ef4444', width: 1.5 }, xAxisIndex: 0, yAxisIndex: 0 });
+    c.setOption({
+        tooltip: { trigger: 'axis', axisPointer: { type: 'cross' }, backgroundColor: 'rgba(15,23,42,0.9)', textStyle: { color: '#fff', fontSize: 11 } },
+        legend: { data: series.map(s => s.name), top: 0, textStyle: { fontSize: 11 } },
+        grid: [{ left: '8%', right: '3%', top: '10%', height: '52%' }, { left: '8%', right: '3%', top: '70%', height: '16%' }],
+        xAxis: [{ type: 'category', data: d.dates, axisLabel: { fontSize: 9 }, gridIndex: 0, boundaryGap: true }, { type: 'category', data: d.dates, axisLabel: { show: false }, gridIndex: 1, boundaryGap: true }],
+        yAxis: [{ scale: true, splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' }}, gridIndex: 0 }, { scale: true, splitLine: { show: false }, gridIndex: 1, axisLabel: { show: false } }],
+        dataZoom: [{ type: 'inside', xAxisIndex: [0, 1], start: 40, end: 100 }, { type: 'slider', xAxisIndex: [0, 1], bottom: '2%', height: 15 }],
+        series, animationDuration: 1000,
+    });
+
+    // 지지/저항 수평선 추가
+    {% if sr_levels %}
+    const srData = {{ sr_levels | tojson }};
+    const markLines = [];
+    (srData.supports || []).forEach(s => {
+        markLines.push({ yAxis: s.price, name: `S $${s.price}`, lineStyle: { color: '#10b981', type: 'dashed', width: 1 }, label: { formatter: `S ${s.price}`, position: 'start', fontSize: 10, color: '#10b981' } });
+    });
+    (srData.resistances || []).forEach(r => {
+        markLines.push({ yAxis: r.price, name: `R $${r.price}`, lineStyle: { color: '#ef4444', type: 'dashed', width: 1 }, label: { formatter: `R ${r.price}`, position: 'start', fontSize: 10, color: '#ef4444' } });
+    });
+    if (markLines.length > 0) {
+        c.setOption({ series: [{ name: '가격', markLine: { silent: true, symbol: 'none', data: markLines } }] }, { replaceMerge: [] });
+    }
+    {% endif %}
+}).catch(e => console.error('Price chart error:', e));
+
+{% if rec_history and rec_history|length > 1 %}
+const history = {{ rec_history | tojson }};
+const sc = initChart('scoreChart');
+if (sc) sc.setOption(lineChartOption(history.map(h=>h.date).reverse(), history.map(h=>h.total_score).reverse(), COLORS.primary));
+{% endif %}
+</script>
+{% endif %}
+{% endblock %}

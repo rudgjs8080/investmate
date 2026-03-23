@@ -1,0 +1,40 @@
+# 런타임 데이터
+data/
+logs/
+reports/
+results/
+
+# 데이터베이스
+*.db
+*.sqlite
+
+# 환경 설정
+.env
+.env.local
+
+# Claude Code 로컬 설정
+.claude/
+
+# Python
+__pycache__/
+.venv/
+*.pyc
+*.pyo
+.pytest_cache/
+htmlcov/
+.coverage
+
+# 패키징
+dist/
+build/
+*.egg-info/
+.eggs/
+
+# ML 모델 파일
+*.pkl
+*.joblib
+*.h5
+
+# OS
+.DS_Store
+Thumbs.db

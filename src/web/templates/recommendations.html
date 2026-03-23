@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block title %}추천 상세 {{ date }}{% endblock %}
+
+{% block content %}
+<!-- 브레드크럼 -->
+<nav class="text-xs text-gray-400 mb-4">
+    <a href="/" class="hover:text-indigo-500">대시보드</a>
+    <span class="mx-1">/</span>
+    <span>추천 상세</span>
+</nav>
+
+<div class="flex justify-between items-center mb-6">
+    <div>
+        <h1 class="text-2xl font-bold">추천 종목 상세</h1>
+        <p class="text-sm text-gray-400">{{ date }} · {{ recommendations|length }}종목</p>
+    </div>
+    {% if macro %}
+    <span class="inline-flex px-3 py-1.5 rounded-lg text-sm font-semibold {% if macro.market_score and macro.market_score >= 6 %}bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400{% elif macro.market_score and macro.market_score <= 3 %}bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400{% else %}bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400{% endif %}">
+        {{ macro.mood }} {{ macro.market_score }}/10
+    </span>
+    {% endif %}
+</div>
+
+{% for rec in recommendations %}
+<div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-5 mb-4">
+    <!-- 종목 헤더 -->
+    <div class="flex justify-between items-start mb-3">
+        <div>
+            <div class="flex items-center gap-2">
+                <span class="text-xs font-bold text-gray-300">#{{ rec.rank }}</span>
+                <a href="/stock/{{ rec.ticker }}" class="text-lg font-bold text-blue-500 hover:underline">{{ rec.ticker }}</a>
+                <span class="text-sm text-gray-400">{{ rec.name }}</span>
+            </div>
+            <p class="text-xs text-gray-400 mt-0.5">{{ rec.sector }} · ${{ "{:,.2f}".format(rec.price) }}{% if rec.price_change %} <span class="{% if rec.price_change > 0 %}text-emerald-500{% else %}text-red-500{% endif %}">{% if rec.price_change > 0 %}▲{% elif rec.price_change < 0 %}▼{% endif %} {{ "{:+.1f}%".format(rec.price_change) }}</span>{% endif %}</p>
+        </div>
+        <div class="text-2xl font-black {% if rec.total_score >= 7 %}text-emerald-500{% elif rec.total_score >= 5.5 %}text-indigo-500{% else %}text-amber-500{% endif %}">
+            {{ "%.1f"|format(rec.total_score) }}<span class="text-xs font-normal text-gray-400">/10</span>
+        </div>
+    </div>
+
+    <!-- AI 신뢰도 바 -->
+    {% if rec.ai_approved is not none %}
+    <div class="flex items-center gap-3 mb-3 px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-700/50">
+        {% if rec.ai_approved %}
+            <span class="inline-flex px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">AI 추천</span>
+        {% else %}
+            <span class="inline-flex px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">AI 제외</span>
+        {% endif %}
+        {% if rec.ai_confidence %}
+        <div class="flex-1 bg-gray-200 dark:bg-gray-600 rounded-full h-2 overflow-hidden">
+            <div class="h-full rounded-full transition-all {% if rec.ai_confidence >= 7 %}bg-emerald-500{% elif rec.ai_confidence >= 4 %}bg-amber-500{% else %}bg-red-500{% endif %}" style="width:{{ rec.ai_confidence * 10 }}%"></div>
+        </div>
+        <span class="text-sm font-bold">{{ rec.ai_confidence }}/10</span>
+        {% endif %}
+        {% if rec.ai_risk_level %}
+        <span class="px-2 py-0.5 rounded-full text-xs font-medium {% if rec.ai_risk_level == 'LOW' %}bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400{% elif rec.ai_risk_level == 'HIGH' %}bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400{% else %}bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400{% endif %}">{{ rec.ai_risk_level }}</span>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- 추천 근거 -->
+    <p class="text-sm text-gray-600 dark:text-gray-300 mb-2">{{ rec.reason }}</p>
+
+    {% if rec.ai_reason %}
+    <div class="bg-indigo-50/50 dark:bg-indigo-900/10 border-l-3 border-indigo-400 rounded-r-lg px-4 py-3 text-sm mb-3">
+        <p class="text-gray-700 dark:text-gray-200">{{ rec.ai_reason }}</p>
+        {% if rec.ai_entry_strategy %}<p class="text-gray-500 mt-1"><span class="font-semibold text-indigo-500">매수:</span> {{ rec.ai_entry_strategy }}</p>{% endif %}
+        {% if rec.ai_exit_strategy %}<p class="text-gray-500 mt-0.5"><span class="font-semibold text-indigo-500">익절/손절:</span> {{ rec.ai_exit_strategy }}</p>{% endif %}
+        {% if rec.ai_target_price or rec.ai_stop_loss %}
+        <p class="text-gray-400 mt-1 text-xs">🎯 ${{ "{:,.0f}".format(rec.ai_target_price) if rec.ai_target_price else '-' }} · 🛑 ${{ "{:,.0f}".format(rec.ai_stop_loss) if rec.ai_stop_loss else '-' }}</p>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- 점수 배지 + 레이더 -->
+    <div class="flex flex-col sm:flex-row gap-4 mt-3">
+        <div class="flex-1">
+            <div class="flex flex-wrap gap-1.5 mb-2">
+                {% for label, score in [('기술', rec.technical_score), ('기본', rec.fundamental_score), ('수급', rec.smart_money_score), ('외부', rec.external_score), ('모멘텀', rec.momentum_score)] %}
+                <span class="inline-flex px-2.5 py-1 rounded-lg text-xs font-medium bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-300">{{ label }} {{ "%.1f"|format(score) }}</span>
+                {% endfor %}
+            </div>
+            {% if rec.signals %}
+            <div class="flex flex-wrap gap-1.5">
+                {% for s in rec.signals %}
+                <span class="inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold {% if s.direction == 'BUY' %}bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400{% else %}bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400{% endif %}">{{ s.type }} {{ s.strength }}</span>
+                {% endfor %}
+            </div>
+            {% endif %}
+            {% if rec.risk_factors %}
+            <p class="text-xs text-red-400 mt-2">⚠ {{ rec.risk_factors | join(' · ') }}</p>
+            {% endif %}
+        </div>
+        <div id="radar-{{ rec.ticker }}" class="w-44 h-40 flex-shrink-0" role="img" aria-label="{{ rec.ticker }} 점수 레이더 차트"></div>
+    </div>
+</div>
+{% endfor %}
+
+{% if not recommendations %}
+<div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border p-12 text-center">
+    <div class="text-5xl mb-4">📋</div>
+    <h3 class="text-lg font-semibold">해당 날짜의 추천 데이터가 없습니다</h3>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+{% for rec in recommendations %}
+{
+    const c = initChart('radar-{{ rec.ticker }}');
+    if (c) c.setOption(radarChartOption(
+        ['기술','기본','수급','외부','모멘텀'],
+        [{{ rec.technical_score }}, {{ rec.fundamental_score }}, {{ rec.smart_money_score }}, {{ rec.external_score }}, {{ rec.momentum_score }}],
+        COLORS.primary
+    ));
+}
+{% endfor %}
+</script>
+{% endblock %}

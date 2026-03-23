@@ -1,0 +1,275 @@
+{% extends "base.html" %}
+{% block title %}스크리너{% endblock %}
+
+{% block content %}
+<div class="flex flex-col lg:flex-row gap-4">
+    <!-- Mobile filter button -->
+    <div class="lg:hidden mb-4 flex gap-2">
+        <button id="mobileFilterBtn" onclick="document.getElementById('filterDrawer').classList.toggle('hidden'); this.textContent = document.getElementById('filterDrawer').classList.contains('hidden') ? '필터 열기' : '필터 닫기'"
+            class="flex-1 py-2.5 rounded-lg bg-indigo-500 text-white text-sm font-semibold hover:bg-indigo-600 transition shadow-sm">
+            필터 열기
+        </button>
+        <button onclick="applyFilters()" class="px-6 py-2.5 rounded-lg bg-emerald-500 text-white text-sm font-semibold hover:bg-emerald-600 transition shadow-sm">검색</button>
+    </div>
+
+    <!-- 사이드바 필터: sidebar on desktop, collapsible on mobile -->
+    <aside id="filterDrawer" class="hidden lg:block lg:w-64 flex-shrink-0">
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 sticky top-20">
+            <h2 class="text-sm font-bold uppercase tracking-widest text-gray-400 mb-4">필터</h2>
+
+            <!-- 섹터 -->
+            <div class="mb-4">
+                <label class="block text-xs font-semibold text-gray-500 mb-1.5">섹터</label>
+                <select id="f-sector" class="w-full text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 px-3 py-1.5 focus:ring-2 focus:ring-accent/30 focus:outline-none">
+                    <option value="">전체</option>
+                    {% for s in sectors %}
+                    <option value="{{ s }}">{{ s }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- RSI -->
+            <div class="mb-4">
+                <label class="block text-xs font-semibold text-gray-500 mb-1.5">RSI (14)</label>
+                <div class="flex gap-2">
+                    <input id="f-rsi-min" type="number" placeholder="min" class="w-1/2 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 px-2 py-1.5 focus:ring-2 focus:ring-accent/30 focus:outline-none">
+                    <input id="f-rsi-max" type="number" placeholder="max" class="w-1/2 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 px-2 py-1.5 focus:ring-2 focus:ring-accent/30 focus:outline-none">
+                </div>
+                <div class="flex gap-1 mt-1.5">
+                    <button onclick="setRSI(null,30)" class="text-[10px] px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 hover:bg-emerald-200">과매도(&lt;30)</button>
+                    <button onclick="setRSI(70,null)" class="text-[10px] px-2 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-600 hover:bg-red-200">과매수(&gt;70)</button>
+                    <button onclick="setRSI(null,null)" class="text-[10px] px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-500 hover:bg-gray-200">리셋</button>
+                </div>
+            </div>
+
+            <!-- PER -->
+            <div class="mb-4">
+                <label class="block text-xs font-semibold text-gray-500 mb-1.5">PER</label>
+                <div class="flex gap-2">
+                    <input id="f-per-min" type="number" placeholder="min" class="w-1/2 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 px-2 py-1.5 focus:ring-2 focus:ring-accent/30 focus:outline-none">
+                    <input id="f-per-max" type="number" placeholder="max" class="w-1/2 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 px-2 py-1.5 focus:ring-2 focus:ring-accent/30 focus:outline-none">
+                </div>
+                <div class="flex gap-1 mt-1.5">
+                    <button onclick="setPER(0,15)" class="text-[10px] px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 hover:bg-emerald-200">저PER(&lt;15)</button>
+                    <button onclick="setPER(0,25)" class="text-[10px] px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-600 hover:bg-blue-200">적정(&lt;25)</button>
+                    <button onclick="setPER(null,null)" class="text-[10px] px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-500 hover:bg-gray-200">리셋</button>
+                </div>
+            </div>
+
+            <!-- PBR -->
+            <div class="mb-4">
+                <label class="block text-xs font-semibold text-gray-500 mb-1.5">PBR</label>
+                <div class="flex gap-2">
+                    <input id="f-pbr-min" type="number" step="0.1" placeholder="min" class="w-1/2 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 px-2 py-1.5 focus:ring-2 focus:ring-accent/30 focus:outline-none">
+                    <input id="f-pbr-max" type="number" step="0.1" placeholder="max" class="w-1/2 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 px-2 py-1.5 focus:ring-2 focus:ring-accent/30 focus:outline-none">
+                </div>
+            </div>
+
+            <!-- ROE -->
+            <div class="mb-4">
+                <label class="block text-xs font-semibold text-gray-500 mb-1.5">ROE (%)</label>
+                <input id="f-roe-min" type="number" step="0.1" placeholder="최소 ROE%" class="w-full text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 px-3 py-1.5 focus:ring-2 focus:ring-accent/30 focus:outline-none">
+            </div>
+
+            <!-- 배당수익률 -->
+            <div class="mb-4">
+                <label class="block text-xs font-semibold text-gray-500 mb-1.5">배당수익률 (%)</label>
+                <input id="f-div-min" type="number" step="0.1" placeholder="최소" class="w-full text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 px-3 py-1.5 focus:ring-2 focus:ring-accent/30 focus:outline-none">
+            </div>
+
+            <!-- 시그널 -->
+            <div class="mb-4">
+                <label class="block text-xs font-semibold text-gray-500 mb-1.5">시그널</label>
+                <select id="f-signal" class="w-full text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 px-3 py-1.5 focus:ring-2 focus:ring-accent/30 focus:outline-none">
+                    <option value="">전체</option>
+                    <option value="golden_cross">골든크로스</option>
+                    <option value="rsi_oversold">RSI 과매도</option>
+                    <option value="macd_bullish">MACD 매수전환</option>
+                    <option value="bb_lower_break">볼린저 하단 돌파</option>
+                    <option value="stoch_bullish">스토캐스틱 매수전환</option>
+                </select>
+            </div>
+
+            <button onclick="applyFilters()" class="w-full py-2 rounded-lg bg-indigo-500 text-white text-sm font-semibold hover:bg-indigo-600 transition shadow-sm">검색</button>
+            <button onclick="resetFilters()" class="w-full py-2 mt-2 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-sm font-medium hover:bg-gray-200 dark:hover:bg-gray-600 transition">초기화</button>
+        </div>
+    </aside>
+
+    <!-- 결과 -->
+    <div class="flex-1 min-w-0">
+        <div class="flex justify-between items-center mb-4">
+            <div>
+                <h1 class="text-2xl font-bold">종목 스크리너</h1>
+                <p id="resultCount" class="text-sm text-gray-400">필터를 설정하고 검색하세요</p>
+            </div>
+            <div class="flex items-center gap-2 text-sm text-gray-400">
+                <span>정렬:</span>
+                <select id="sort-by" onchange="applyFilters()" class="text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 px-2 py-1 focus:ring-2 focus:ring-accent/30 focus:outline-none">
+                    <option value="ticker">티커</option>
+                    <option value="rsi">RSI</option>
+                    <option value="per">PER</option>
+                    <option value="pbr">PBR</option>
+                    <option value="roe" selected>ROE</option>
+                    <option value="dividend_yield">배당률</option>
+                    <option value="market_cap">시총</option>
+                    <option value="price">가격</option>
+                </select>
+                <select id="sort-dir" onchange="applyFilters()" class="text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 px-2 py-1 focus:ring-2 focus:ring-accent/30 focus:outline-none">
+                    <option value="desc">내림차순</option>
+                    <option value="asc">오름차순</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- 프리셋 -->
+        <div class="flex flex-wrap gap-2 mb-4">
+            <button onclick="presetValue()" class="text-xs px-3 py-1.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 font-medium hover:bg-blue-200 transition">가치주</button>
+            <button onclick="presetGrowth()" class="text-xs px-3 py-1.5 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 font-medium hover:bg-emerald-200 transition">성장주</button>
+            <button onclick="presetDividend()" class="text-xs px-3 py-1.5 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-600 font-medium hover:bg-purple-200 transition">배당주</button>
+            <button onclick="presetOversold()" class="text-xs px-3 py-1.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-600 font-medium hover:bg-amber-200 transition">과매도 반등</button>
+        </div>
+
+        <!-- 결과 테이블 -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-[11px] uppercase tracking-wider text-gray-400 border-b border-gray-100 dark:border-gray-700">
+                            <th class="px-3 py-2.5 text-left">종목</th>
+                            <th class="px-3 py-2.5 text-left">섹터</th>
+                            <th class="px-3 py-2.5 text-right">가격</th>
+                            <th class="px-3 py-2.5 text-right">RSI</th>
+                            <th class="px-3 py-2.5 text-right">PER</th>
+                            <th class="px-3 py-2.5 text-right">PBR</th>
+                            <th class="px-3 py-2.5 text-right">ROE%</th>
+                            <th class="px-3 py-2.5 text-right">배당률%</th>
+                            <th class="px-3 py-2.5 text-right">시총</th>
+                        </tr>
+                    </thead>
+                    <tbody id="resultsBody" class="divide-y divide-gray-50 dark:divide-gray-700">
+                        <tr><td colspan="9" class="px-4 py-12 text-center text-gray-400">필터를 설정하고 검색 버튼을 클릭하세요</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function esc(s) { const d = document.createElement('div'); d.appendChild(document.createTextNode(String(s ?? ''))); return d.innerHTML; }
+function val(id) { const v = document.getElementById(id).value; return v === '' ? null : v; }
+function setVal(id, v) { document.getElementById(id).value = v === null ? '' : v; }
+
+function setRSI(min, max) { setVal('f-rsi-min', min); setVal('f-rsi-max', max); }
+function setPER(min, max) { setVal('f-per-min', min); setVal('f-per-max', max); }
+
+function presetValue() {
+    resetFilters();
+    setVal('f-per-max', 15); setVal('f-pbr-max', 2);
+    document.getElementById('sort-by').value = 'per';
+    document.getElementById('sort-dir').value = 'asc';
+    applyFilters();
+}
+function presetGrowth() {
+    resetFilters();
+    setVal('f-roe-min', 20);
+    document.getElementById('sort-by').value = 'roe';
+    document.getElementById('sort-dir').value = 'desc';
+    applyFilters();
+}
+function presetDividend() {
+    resetFilters();
+    setVal('f-div-min', 2);
+    document.getElementById('sort-by').value = 'dividend_yield';
+    document.getElementById('sort-dir').value = 'desc';
+    applyFilters();
+}
+function presetOversold() {
+    resetFilters();
+    setVal('f-rsi-max', 30);
+    document.getElementById('sort-by').value = 'rsi';
+    document.getElementById('sort-dir').value = 'asc';
+    applyFilters();
+}
+
+function resetFilters() {
+    ['f-sector','f-rsi-min','f-rsi-max','f-per-min','f-per-max','f-pbr-min','f-pbr-max','f-roe-min','f-div-min','f-signal'].forEach(id => setVal(id, null));
+}
+
+function fmtCap(v) {
+    if (!v) return '-';
+    if (v >= 1e12) return (v/1e12).toFixed(1) + 'T';
+    if (v >= 1e9) return (v/1e9).toFixed(1) + 'B';
+    if (v >= 1e6) return (v/1e6).toFixed(0) + 'M';
+    return v.toLocaleString();
+}
+
+function fmtVol(v) {
+    if (!v) return '-';
+    if (v >= 1e6) return (v/1e6).toFixed(1) + 'M';
+    if (v >= 1e3) return (v/1e3).toFixed(0) + 'K';
+    return v.toLocaleString();
+}
+
+function rsiColor(v) {
+    if (v === null) return 'text-gray-400';
+    if (v < 30) return 'text-emerald-500 font-bold';
+    if (v > 70) return 'text-red-500 font-bold';
+    return '';
+}
+
+async function applyFilters() {
+    const params = new URLSearchParams();
+    const sector = val('f-sector'); if (sector) params.set('sector', sector);
+    const rsiMin = val('f-rsi-min'); if (rsiMin) params.set('rsi_min', rsiMin);
+    const rsiMax = val('f-rsi-max'); if (rsiMax) params.set('rsi_max', rsiMax);
+    const perMin = val('f-per-min'); if (perMin) params.set('per_min', perMin);
+    const perMax = val('f-per-max'); if (perMax) params.set('per_max', perMax);
+    const pbrMin = val('f-pbr-min'); if (pbrMin) params.set('pbr_min', pbrMin);
+    const pbrMax = val('f-pbr-max'); if (pbrMax) params.set('pbr_max', pbrMax);
+    const roeMin = val('f-roe-min'); if (roeMin) params.set('roe_min', roeMin);
+    const divMin = val('f-div-min'); if (divMin) params.set('div_min', divMin);
+    const sig = val('f-signal'); if (sig) params.set('signal', sig);
+    params.set('sort_by', document.getElementById('sort-by').value);
+    params.set('sort_dir', document.getElementById('sort-dir').value);
+
+    const body = document.getElementById('resultsBody');
+    body.innerHTML = '<tr><td colspan="9" class="px-4 py-8 text-center text-gray-400">로딩 중...</td></tr>';
+
+    try {
+        const resp = await fetch('/api/screener?' + params.toString());
+        const data = await resp.json();
+        document.getElementById('resultCount').textContent = `${data.total}개 종목`;
+
+        if (!data.results.length) {
+            body.innerHTML = '<tr><td colspan="9" class="px-4 py-12 text-center text-gray-400">조건에 맞는 종목이 없습니다</td></tr>';
+            return;
+        }
+
+        body.innerHTML = data.results.map(r => `
+            <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition cursor-pointer" onclick="location.href='/stock/${esc(r.ticker)}'">
+                <td class="px-3 py-2.5">
+                    <div class="font-semibold text-blue-500">${esc(r.ticker)}</div>
+                    <div class="text-[11px] text-gray-400 truncate max-w-[120px]">${esc(r.name)}</div>
+                </td>
+                <td class="px-3 py-2.5 text-xs text-gray-500">${esc(r.sector)}</td>
+                <td class="px-3 py-2.5 text-right tabular-nums font-medium">${r.price ? '$' + r.price.toFixed(2) : '-'}</td>
+                <td class="px-3 py-2.5 text-right tabular-nums ${rsiColor(r.rsi)}">${r.rsi !== null ? r.rsi.toFixed(1) : '-'}</td>
+                <td class="px-3 py-2.5 text-right tabular-nums">${r.per !== null ? r.per.toFixed(1) : '-'}</td>
+                <td class="px-3 py-2.5 text-right tabular-nums">${r.pbr !== null ? r.pbr.toFixed(2) : '-'}</td>
+                <td class="px-3 py-2.5 text-right tabular-nums ${r.roe && r.roe > 20 ? 'text-emerald-500 font-medium' : ''}">${r.roe !== null ? r.roe.toFixed(1) + '%' : '-'}</td>
+                <td class="px-3 py-2.5 text-right tabular-nums ${r.dividend_yield && r.dividend_yield > 2 ? 'text-purple-500 font-medium' : ''}">${r.dividend_yield !== null ? r.dividend_yield.toFixed(2) + '%' : '-'}</td>
+                <td class="px-3 py-2.5 text-right tabular-nums text-xs text-gray-500">${fmtCap(r.market_cap)}</td>
+            </tr>
+        `).join('');
+    } catch(e) {
+        body.innerHTML = '<tr><td colspan="9" class="px-4 py-12 text-center text-red-400">오류가 발생했습니다</td></tr>';
+    }
+}
+
+// 페이지 로드 시 전체 종목 표시
+applyFilters();
+</script>
+{% endblock %}

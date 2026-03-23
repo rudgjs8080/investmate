@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block title %}AI 정확도{% endblock %}
+
+{% block content %}
+<nav class="text-xs text-gray-400 mb-4">
+    <a href="/" class="hover:text-indigo-500">대시보드</a>
+    <span class="mx-1">/</span>
+    <span>AI 정확도</span>
+</nav>
+
+<h1 class="text-2xl font-bold mb-6">AI 예측 정확도</h1>
+
+{% if data %}
+<!-- KPI -->
+<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 text-center">
+        <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold mb-1">총 예측</div>
+        <div class="text-3xl font-black">{{ data.total }}</div>
+        <p class="text-xs text-gray-400 mt-1">추천 {{ data.approved_count }} · 제외 {{ data.excluded_count }}</p>
+    </div>
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 text-center">
+        <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold mb-1">방향 정확도</div>
+        <div class="text-3xl font-black {% if data.direction_accuracy and data.direction_accuracy > 55 %}text-emerald-500{% elif data.direction_accuracy and data.direction_accuracy < 45 %}text-red-500{% else %}text-amber-500{% endif %}">
+            {{ "%.0f"|format(data.direction_accuracy) if data.direction_accuracy else '-' }}%
+        </div>
+    </div>
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 text-center">
+        <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold mb-1">추천 승률</div>
+        <div class="text-3xl font-black {% if data.win_rate_approved and data.win_rate_approved > 55 %}text-emerald-500{% else %}text-amber-500{% endif %}">
+            {{ "%.0f"|format(data.win_rate_approved) if data.win_rate_approved else '-' }}%
+        </div>
+    </div>
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 text-center">
+        <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold mb-1">목표가 과대추정</div>
+        <div class="text-3xl font-black {% if data.overestimate_rate and data.overestimate_rate > 60 %}text-red-500{% else %}text-emerald-500{% endif %}">
+            {{ "%.0f"|format(data.overestimate_rate) if data.overestimate_rate else '-' }}%
+        </div>
+    </div>
+</div>
+
+<!-- 차트 -->
+<div class="grid md:grid-cols-2 gap-4 mb-5">
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4">
+        <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">AI 추천 vs 제외</div>
+        <div id="compChart" role="img" aria-label="AI 추천 vs 제외 비교 차트" style="height:260px"></div>
+    </div>
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4">
+        <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">신뢰도 교정 곡선</div>
+        <div id="calibChart" role="img" aria-label="신뢰도 교정 곡선 차트" style="height:260px"></div>
+        <p class="text-xs text-gray-400 mt-1 text-center">대각선에 가까울수록 AI 신뢰도가 정확</p>
+    </div>
+</div>
+
+{% if data.sector_accuracy %}
+<div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 mb-5">
+    <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">섹터별 AI 승률</div>
+    <div id="sectorAcc" role="img" aria-label="섹터별 AI 승률 차트" style="height:280px"></div>
+</div>
+{% endif %}
+
+<!-- 신뢰도 테이블 -->
+{% if data.confidence_calibration %}
+<div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
+    <div class="px-4 py-3 border-b border-gray-100 dark:border-gray-700">
+        <span class="text-xs uppercase tracking-widest text-gray-400 font-semibold">신뢰도별 실제 승률</span>
+    </div>
+    <table class="w-full text-sm">
+        <thead><tr class="text-[11px] uppercase tracking-wider text-gray-400 border-b border-gray-100 dark:border-gray-700">
+            <th class="px-4 py-2 text-left">신뢰도</th><th class="px-3 py-2 text-right">실제 승률</th><th class="px-3 py-2 text-right">이상적</th><th class="px-3 py-2 text-right">차이</th>
+        </tr></thead>
+        <tbody class="divide-y divide-gray-50 dark:divide-gray-700">
+        {% for conf, rate in data.confidence_calibration.items()|sort %}
+        <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+            <td class="px-4 py-2 font-semibold">{{ conf }}/10</td>
+            <td class="px-3 py-2 text-right tabular-nums">{{ "%.1f%%"|format(rate) }}</td>
+            <td class="px-3 py-2 text-right tabular-nums text-gray-400">{{ conf * 10 }}%</td>
+            <td class="px-3 py-2 text-right tabular-nums font-medium {% if rate >= conf * 10 %}text-emerald-500{% else %}text-red-500{% endif %}">{{ "{:+.1f}%p".format(rate - conf * 10) }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{% else %}
+<div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-12 text-center">
+    <div class="text-5xl mb-4">🤖</div>
+    <h3 class="text-lg font-semibold mb-2">AI 정확도 데이터 수집 중</h3>
+    <p class="text-sm text-gray-400 mb-4">파이프라인을 20일 이상 실행하면 AI 예측의 정확도를 분석합니다.</p>
+    <div class="w-full max-w-xs mx-auto bg-gray-200 dark:bg-gray-700 rounded-full h-2 mb-2">
+        <div class="bg-indigo-500 h-2 rounded-full" style="width: {{ ([data_days / 20 * 100, 100] | min) if data_days else 0 }}%"></div>
+    </div>
+    <p class="text-xs text-gray-400">{{ data_days if data_days else 0 }}/20일 완료</p>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if data %}
+<script>
+const comp = initChart('compChart');
+if (comp) comp.setOption({
+    tooltip: { trigger: 'axis', backgroundColor: 'rgba(15,23,42,0.9)', textStyle: { color: '#fff' } },
+    legend: { bottom: 0, textStyle: { fontSize: 11 } },
+    grid: { left: '3%', right: '3%', top: '8%', bottom: '15%', containLabel: true },
+    xAxis: { type: 'category', data: ['평균 수익률 (%)', '승률 (%)'], axisLabel: { fontSize: 11 } },
+    yAxis: { type: 'value', splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' }} },
+    series: [
+        { name: 'AI 추천', type: 'bar', data: [{{ data.avg_return_approved or 0 }}, {{ data.win_rate_approved or 0 }}], itemStyle: { color: COLORS.green, borderRadius: [4,4,0,0] }, barMaxWidth: 35 },
+        { name: 'AI 제외', type: 'bar', data: [{{ data.avg_return_excluded or 0 }}, {{ data.win_rate_excluded or 0 }}], itemStyle: { color: COLORS.red, borderRadius: [4,4,0,0] }, barMaxWidth: 35 },
+    ],
+    animationDuration: 800,
+});
+
+fetch('/api/ai-accuracy/calibration').then(r=>r.json()).then(d => {
+    const c = initChart('calibChart');
+    if (!c || !d.labels.length) return;
+    c.setOption({
+        tooltip: { trigger: 'axis', backgroundColor: 'rgba(15,23,42,0.9)', textStyle: { color: '#fff' } },
+        grid: { left: '3%', right: '3%', top: '8%', bottom: '3%', containLabel: true },
+        xAxis: { type: 'category', data: d.labels.map(l => l + '/10'), axisLabel: { fontSize: 10 } },
+        yAxis: { type: 'value', min: 0, max: 100, name: '승률 (%)', splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' }} },
+        series: [
+            { name: '실제', type: 'line', data: d.values, smooth: true, lineStyle: { color: COLORS.primary, width: 3 }, symbol: 'circle', symbolSize: 8, itemStyle: { color: COLORS.primary } },
+            { name: '이상적', type: 'line', data: d.labels.map(l => l * 10), lineStyle: { color: '#d1d5db', type: 'dashed', width: 1 }, symbol: 'none' },
+        ],
+    });
+}).catch(e => console.error(e));
+
+{% if data.sector_accuracy %}
+fetch('/api/ai-accuracy/sector').then(r=>r.json()).then(d => {
+    const c = initChart('sectorAcc');
+    if (!c) return;
+    const sectors = Object.keys(d).sort((a,b) => d[b]-d[a]);
+    const values = sectors.map(s => d[s]);
+    c.setOption(barChartOption(sectors, values, values.map(v => v > 55 ? COLORS.green : v < 45 ? COLORS.red : COLORS.orange), { horizontal: true }));
+}).catch(e => console.error(e));
+{% endif %}
+</script>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,415 @@
+"""백테스트 엔진 — 과거 추천 데이터 기반 성과 분석.
+
+fact_daily_recommendations에 저장된 추천과 사후 수익률을 활용하여
+알고리즘의 역사적 성과를 측정한다.
+"""
+
+from __future__ import annotations
+
+import logging
+import math
+import statistics
+from dataclasses import dataclass, field
+from datetime import date
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from src.config import get_settings
+from src.db.helpers import date_to_id, id_to_date
+from src.db.models import DimStock, FactDailyRecommendation
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class BacktestConfig:
+    """백테스트 설정."""
+
+    start_date: date
+    end_date: date
+    top_n: int = 10
+    holdout_pct: float = 0.0  # 0.0~1.0, OOS 홀드아웃 비율
+
+
+@dataclass(frozen=True)
+class DailyResult:
+    """일별 백테스트 결과."""
+
+    run_date: date
+    recommendation_count: int
+    avg_return_1d: float | None = None
+    avg_return_5d: float | None = None
+    avg_return_10d: float | None = None
+    avg_return_20d: float | None = None
+
+
+@dataclass(frozen=True)
+class HoldoutResult:
+    """홀드아웃 분할 결과."""
+
+    is_avg_return_20d: float | None = None
+    is_win_rate_20d: float | None = None
+    is_sharpe: float | None = None
+    oos_avg_return_20d: float | None = None
+    oos_win_rate_20d: float | None = None
+    oos_sharpe: float | None = None
+    is_count: int = 0
+    oos_count: int = 0
+
+
+@dataclass(frozen=True)
+class BacktestResult:
+    """전체 백테스트 결과."""
+
+    config: BacktestConfig
+    total_days: int
+    total_recommendations: int
+    avg_return_1d: float | None = None
+    avg_return_5d: float | None = None
+    avg_return_10d: float | None = None
+    avg_return_20d: float | None = None
+    win_rate_1d: float | None = None
+    win_rate_5d: float | None = None
+    win_rate_20d: float | None = None
+    sharpe_ratio: float | None = None
+    max_drawdown: float | None = None
+    best_pick: tuple[str, float, str] | None = None  # (ticker, return%, date)
+    worst_pick: tuple[str, float, str] | None = None
+    by_date: tuple[DailyResult, ...] = field(default_factory=tuple)
+    # 확장 지표
+    sortino_ratio: float | None = None
+    calmar_ratio: float | None = None
+    omega_ratio: float | None = None
+    monthly_win_rate: float | None = None
+    max_drawdown_days: int | None = None
+    # 홀드아웃 결과 (holdout_pct > 0일 때)
+    holdout: HoldoutResult | None = None
+
+
+def _estimate_tx_cost(volume: int | None, price: float | None, base_bps: int = 20) -> float:
+    """유동성 기반 거래비용을 추정한다 (bps).
+
+    - 달러 거래량 > $10M: base_bps
+    - $1M ~ $10M: base_bps + 5
+    - < $1M: base_bps + 15
+    """
+    if volume is None or price is None or volume == 0:
+        return base_bps + 15  # worst case
+
+    dollar_volume = volume * price
+    if dollar_volume >= 10_000_000:
+        return base_bps
+    elif dollar_volume >= 1_000_000:
+        return base_bps + 5
+    else:
+        return base_bps + 15
+
+
+class BacktestEngine:
+    """과거 추천 데이터로 백테스트를 실행한다."""
+
+    def run(self, session: Session, config: BacktestConfig) -> BacktestResult:
+        """주어진 기간의 추천 데이터를 분석한다."""
+        start_id = date_to_id(config.start_date)
+        end_id = date_to_id(config.end_date)
+
+        stmt = (
+            select(FactDailyRecommendation, DimStock.ticker)
+            .join(DimStock, FactDailyRecommendation.stock_id == DimStock.stock_id)
+            .where(FactDailyRecommendation.run_date_id >= start_id)
+            .where(FactDailyRecommendation.run_date_id <= end_id)
+            .where(FactDailyRecommendation.rank <= config.top_n)
+            .order_by(FactDailyRecommendation.run_date_id, FactDailyRecommendation.rank)
+        )
+        rows = session.execute(stmt).all()
+
+        if not rows:
+            return BacktestResult(
+                config=config, total_days=0, total_recommendations=0,
+            )
+
+        # 거래 비용 로드 (bps -> %)
+        settings = get_settings()
+        tx_cost_pct = settings.transaction_cost_bps / 100
+
+        # 일별 그룹핑
+        by_date: dict[int, list[tuple]] = {}
+        all_returns_1d: list[float] = []
+        all_returns_5d: list[float] = []
+        all_returns_10d: list[float] = []
+        all_returns_20d: list[float] = []
+
+        best = None  # (ticker, return_20d, date_str)
+        worst = None
+
+        for rec, ticker in rows:
+            date_id = rec.run_date_id
+            by_date.setdefault(date_id, []).append((rec, ticker))
+
+            if rec.return_1d is not None:
+                all_returns_1d.append(float(rec.return_1d) - tx_cost_pct)
+            if rec.return_5d is not None:
+                all_returns_5d.append(float(rec.return_5d) - tx_cost_pct)
+            if rec.return_10d is not None:
+                all_returns_10d.append(float(rec.return_10d) - tx_cost_pct)
+            if rec.return_20d is not None:
+                r20 = float(rec.return_20d) - tx_cost_pct
+                all_returns_20d.append(r20)
+                try:
+                    d_str = id_to_date(date_id).isoformat()
+                except Exception:
+                    d_str = str(date_id)
+                if best is None or r20 > best[1]:
+                    best = (ticker, r20, d_str)
+                if worst is None or r20 < worst[1]:
+                    worst = (ticker, r20, d_str)
+
+        # 일별 결과
+        daily_results = []
+        for d_id in sorted(by_date.keys()):
+            recs = by_date[d_id]
+            r1 = [float(r.return_1d) - tx_cost_pct for r, _ in recs if r.return_1d is not None]
+            r5 = [float(r.return_5d) - tx_cost_pct for r, _ in recs if r.return_5d is not None]
+            r10 = [float(r.return_10d) - tx_cost_pct for r, _ in recs if r.return_10d is not None]
+            r20 = [float(r.return_20d) - tx_cost_pct for r, _ in recs if r.return_20d is not None]
+            try:
+                run_date = id_to_date(d_id)
+            except Exception:
+                run_date = config.start_date
+            daily_results.append(DailyResult(
+                run_date=run_date,
+                recommendation_count=len(recs),
+                avg_return_1d=_safe_mean(r1),
+                avg_return_5d=_safe_mean(r5),
+                avg_return_10d=_safe_mean(r10),
+                avg_return_20d=_safe_mean(r20),
+            ))
+
+        # 집계 — 20일 기간에 맞게 무위험 수익률을 스케일링
+        # 연간 % → 20 거래일 기간 %
+        rf_20d = settings.risk_free_rate_pct * (20 / 252)
+        sharpe = _calculate_sharpe(all_returns_20d, risk_free=rf_20d)
+        max_dd = _calculate_max_drawdown(all_returns_20d)
+
+        # 확장 지표 계산
+        sortino = _calculate_sortino(all_returns_20d, risk_free=rf_20d)
+        calmar = _calculate_calmar(all_returns_20d, max_dd)
+        omega = _calculate_omega(all_returns_20d)
+        monthly_wr = _calculate_monthly_win_rate(daily_results)
+        mdd_days = _calculate_max_drawdown_days(all_returns_20d)
+
+        # 홀드아웃 분석
+        holdout = None
+        if config.holdout_pct > 0 and all_returns_20d:
+            holdout = _compute_holdout(all_returns_20d, config.holdout_pct, rf_20d)
+
+        return BacktestResult(
+            config=config,
+            total_days=len(by_date),
+            total_recommendations=len(rows),
+            avg_return_1d=_safe_mean(all_returns_1d),
+            avg_return_5d=_safe_mean(all_returns_5d),
+            avg_return_10d=_safe_mean(all_returns_10d),
+            avg_return_20d=_safe_mean(all_returns_20d),
+            win_rate_1d=_win_rate(all_returns_1d),
+            win_rate_5d=_win_rate(all_returns_5d),
+            win_rate_20d=_win_rate(all_returns_20d),
+            sharpe_ratio=sharpe,
+            max_drawdown=max_dd,
+            best_pick=best,
+            worst_pick=worst,
+            by_date=tuple(daily_results),
+            sortino_ratio=sortino,
+            calmar_ratio=calmar,
+            omega_ratio=omega,
+            monthly_win_rate=monthly_wr,
+            max_drawdown_days=mdd_days,
+            holdout=holdout,
+        )
+
+
+def _safe_mean(values: list[float]) -> float | None:
+    """빈 리스트면 None, 아니면 평균."""
+    return statistics.mean(values) if values else None
+
+
+def _win_rate(values: list[float]) -> float | None:
+    """양수 수익 비율."""
+    if not values:
+        return None
+    wins = sum(1 for v in values if v > 0)
+    return wins / len(values) * 100
+
+
+def _calculate_sharpe(returns: list[float], risk_free: float = 0.0) -> float | None:
+    """연환산 샤프 비율.
+
+    20일 기준 수익률을 연환산 (sqrt(252/20))하여 산업 표준과 비교 가능하게 함.
+    """
+    if len(returns) < 2:
+        return None
+    mean_r = statistics.mean(returns)
+    std_r = statistics.stdev(returns)
+    if std_r == 0:
+        return None
+    raw_sharpe = (mean_r - risk_free) / std_r
+    # 20일 주기 -> 연환산: sqrt(252/20) ~ 3.55
+    annualization_factor = math.sqrt(252 / 20)
+    return round(raw_sharpe * annualization_factor, 3)
+
+
+def _calculate_max_drawdown(returns: list[float]) -> float | None:
+    """누적 수익 기준 최대 낙폭."""
+    if not returns:
+        return None
+    cumulative = 0.0
+    peak = 0.0
+    max_dd = 0.0
+    for r in returns:
+        cumulative += r
+        if cumulative > peak:
+            peak = cumulative
+        dd = peak - cumulative
+        if dd > max_dd:
+            max_dd = dd
+    return max_dd
+
+
+def _calculate_sortino(returns: list[float], risk_free: float = 0.0) -> float | None:
+    """소르티노 비율 — (mean - rf) / downside_std.
+
+    하방 리스크만 고려하여 샤프보다 정교한 위험 조정 수익률을 제공한다.
+    """
+    if len(returns) < 2:
+        return None
+    mean_r = statistics.mean(returns)
+    downside = [r for r in returns if r < 0]
+    if len(downside) < 2:
+        # 음수 수익이 거의 없으면 소르티노 산출 불가
+        return None
+    downside_std = statistics.stdev(downside)
+    if downside_std == 0:
+        return None
+    raw = (mean_r - risk_free) / downside_std
+    annualization_factor = math.sqrt(252 / 20)
+    return round(raw * annualization_factor, 3)
+
+
+def _calculate_calmar(returns: list[float], max_dd: float | None) -> float | None:
+    """칼마 비율 — annual_return / max_drawdown.
+
+    수익 대비 최대 낙폭의 비율로 리스크 효율성을 측정한다.
+    """
+    if not returns or max_dd is None or max_dd == 0:
+        return None
+    mean_r = statistics.mean(returns)
+    # 20일 수익률을 연환산
+    annual_return = mean_r * (252 / 20)
+    return round(annual_return / max_dd, 3)
+
+
+def _calculate_omega(returns: list[float], threshold: float = 0.0) -> float | None:
+    """오메가 비율 — sum(양수 수익) / sum(|음수 수익|).
+
+    threshold 이상 수익의 합을 이하 손실의 합으로 나눈 비율.
+    > 1이면 양호.
+    """
+    if not returns:
+        return None
+    gains = sum(r - threshold for r in returns if r > threshold)
+    losses = sum(threshold - r for r in returns if r < threshold)
+    if losses == 0:
+        return None  # 손실 없으면 무한대 → None 처리
+    return round(gains / losses, 3)
+
+
+def _calculate_monthly_win_rate(daily_results: list[DailyResult]) -> float | None:
+    """월별 승률 — 평균 수익이 양수인 월의 비율.
+
+    DailyResult의 run_date를 기준으로 월별 그룹핑 후 계산한다.
+    """
+    if not daily_results:
+        return None
+
+    monthly_returns: dict[str, list[float]] = {}
+    for dr in daily_results:
+        if dr.avg_return_20d is None:
+            continue
+        key = f"{dr.run_date.year}-{dr.run_date.month:02d}"
+        monthly_returns.setdefault(key, []).append(dr.avg_return_20d)
+
+    if not monthly_returns:
+        return None
+
+    winning_months = 0
+    for returns in monthly_returns.values():
+        if statistics.mean(returns) > 0:
+            winning_months += 1
+
+    return round(winning_months / len(monthly_returns) * 100, 1)
+
+
+def _calculate_max_drawdown_days(returns: list[float]) -> int | None:
+    """MDD 회복 기간 — 최대 낙폭 시작부터 이전 고점 회복까지의 기간 수.
+
+    각 수익률 항목을 하나의 기간(20거래일 사이클)으로 간주한다.
+    """
+    if not returns:
+        return None
+
+    cumulative = 0.0
+    peak = 0.0
+    max_dd = 0.0
+    dd_start_idx = 0
+    max_dd_start = 0
+    max_dd_end = 0
+
+    for i, r in enumerate(returns):
+        cumulative += r
+        if cumulative > peak:
+            peak = cumulative
+            dd_start_idx = i + 1  # 새 고점 이후부터 낙폭 시작
+        dd = peak - cumulative
+        if dd > max_dd:
+            max_dd = dd
+            max_dd_start = dd_start_idx
+            max_dd_end = i
+
+    if max_dd == 0:
+        return 0
+
+    # 최대 낙폭 이후 회복 탐색
+    recovery_idx = None
+    for i in range(max_dd_end + 1, len(returns)):
+        cumulative_at_i = sum(returns[:i + 1])
+        if cumulative_at_i >= peak:
+            recovery_idx = i
+            break
+
+    if recovery_idx is not None:
+        return recovery_idx - max_dd_start
+    # 아직 회복하지 못한 경우 현재까지의 기간
+    return len(returns) - max_dd_start
+
+
+def _compute_holdout(
+    all_returns: list[float], holdout_pct: float, rf_20d: float,
+) -> HoldoutResult:
+    """수익률 리스트를 IS/OOS로 분할하여 결과를 반환한다."""
+    n = len(all_returns)
+    split_idx = max(1, int(n * (1.0 - holdout_pct)))
+
+    is_returns = all_returns[:split_idx]
+    oos_returns = all_returns[split_idx:]
+
+    return HoldoutResult(
+        is_avg_return_20d=_safe_mean(is_returns),
+        is_win_rate_20d=_win_rate(is_returns),
+        is_sharpe=_calculate_sharpe(is_returns, risk_free=rf_20d),
+        oos_avg_return_20d=_safe_mean(oos_returns),
+        oos_win_rate_20d=_win_rate(oos_returns),
+        oos_sharpe=_calculate_sharpe(oos_returns, risk_free=rf_20d),
+        is_count=len(is_returns),
+        oos_count=len(oos_returns),
+    )

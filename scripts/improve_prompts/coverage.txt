@@ -1,0 +1,11 @@
+uv run pytest tests/ --cov=src --cov-report=term-missing 을 실행하고,
+커버리지가 가장 낮은 모듈 3개를 찾아서 각각에 대해:
+
+1. 현재 테스트되지 않는 코드 경로를 파악
+2. edge case와 error case를 포함한 테스트 작성
+3. 작성 후 uv run pytest tests/ -x -q 실행하여 통과 확인
+4. 커버리지가 올라갔는지 확인
+
+테스트 파일은 tests/ 디렉토리에 test_{모듈명}.py 형식으로.
+모든 테스트에 한국어로 된 설명적인 테스트 이름을 사용해.
+절대 기존에 통과하던 테스트를 깨뜨리지 마.
