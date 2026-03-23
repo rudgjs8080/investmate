@@ -1,8 +1,8 @@
 # 런타임 데이터 (프로젝트 루트의 data/ 디렉토리만)
 /data/
-logs/
-reports/
-results/
+/logs/
+/reports/
+/results/
 
 # 데이터베이스
 *.db

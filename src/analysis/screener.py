@@ -97,12 +97,13 @@ def _apply_correlation_filter(
     top_candidates = candidates[:check_size]
 
     # 20일 수익률 데이터 수집
+    from sqlalchemy import select as sa_select
     stock_returns: dict[int, list[float]] = {}
     for cand in top_candidates:
         sid = cand["stock_id"]
         from src.db.models import FactDailyPrice
         rows = session.execute(
-            select(FactDailyPrice.adj_close)
+            sa_select(FactDailyPrice.adj_close)
             .where(FactDailyPrice.stock_id == sid)
             .order_by(FactDailyPrice.date_id.desc())
             .limit(61)
