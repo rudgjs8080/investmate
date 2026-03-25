@@ -8,22 +8,66 @@
     <span>시장 히트맵</span>
 </nav>
 
-<div class="flex justify-between items-center mb-4">
+<div class="flex flex-wrap justify-between items-center mb-4 gap-2">
     <h1 class="text-2xl font-bold">S&P 500 시장 히트맵</h1>
-    <div class="flex gap-2" id="period-btns">
-        <button onclick="loadHeatmap('1d')" class="px-3.5 py-1.5 rounded-lg text-sm font-medium bg-indigo-500 text-white shadow-sm" data-period="1d">1일</button>
-        <button onclick="loadHeatmap('5d')" class="px-3.5 py-1.5 rounded-lg text-sm font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300" data-period="5d">5일</button>
-        <button onclick="loadHeatmap('1m')" class="px-3.5 py-1.5 rounded-lg text-sm font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300" data-period="1m">1개월</button>
+    <div class="flex flex-wrap gap-2 items-center">
+        <!-- 기간 선택 -->
+        <div class="flex gap-1" id="period-btns">
+            <button onclick="loadHeatmap('1d')" class="px-3 py-1.5 rounded-lg text-sm font-medium bg-indigo-500 text-white shadow-sm" data-period="1d">1일</button>
+            <button onclick="loadHeatmap('5d')" class="px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300" data-period="5d">5일</button>
+            <button onclick="loadHeatmap('1m')" class="px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300" data-period="1m">1개월</button>
+        </div>
+        <span class="text-gray-300 dark:text-gray-600">|</span>
+        <!-- 크기 기준 토글 -->
+        <div class="flex gap-1" id="size-btns">
+            <button onclick="setSizeMode('mcap')" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-500 text-white shadow-sm" data-size="mcap">시총</button>
+            <button onclick="setSizeMode('equal')" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300" data-size="equal">동일</button>
+        </div>
+        <span class="text-gray-300 dark:text-gray-600">|</span>
+        <!-- 섹터 필터 -->
+        <select id="sector-filter" onchange="applySectorFilter()" class="px-3 py-1.5 rounded-lg text-sm bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-0">
+            <option value="all">전체 섹터</option>
+        </select>
     </div>
 </div>
-<div class="flex items-center gap-2 text-xs text-gray-400 mt-2 mb-3">
+
+<!-- 시장 요약 카드 -->
+<div id="summary-cards" class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2 mb-3" style="display:none">
+    <div class="bg-white dark:bg-gray-800 rounded-lg px-3 py-2 border border-gray-100 dark:border-gray-700 text-center">
+        <div class="text-xs text-gray-400">종목 수</div>
+        <div class="text-lg font-bold" id="sum-total">-</div>
+    </div>
+    <div class="bg-white dark:bg-gray-800 rounded-lg px-3 py-2 border border-gray-100 dark:border-gray-700 text-center">
+        <div class="text-xs text-gray-400">상승 / 하락</div>
+        <div class="text-lg font-bold"><span class="text-emerald-500" id="sum-up">-</span> / <span class="text-red-500" id="sum-down">-</span></div>
+    </div>
+    <div class="bg-white dark:bg-gray-800 rounded-lg px-3 py-2 border border-gray-100 dark:border-gray-700 text-center">
+        <div class="text-xs text-gray-400">시장 폭</div>
+        <div class="text-lg font-bold" id="sum-breadth">-</div>
+    </div>
+    <div class="bg-white dark:bg-gray-800 rounded-lg px-3 py-2 border border-gray-100 dark:border-gray-700 text-center">
+        <div class="text-xs text-gray-400">평균 수익률</div>
+        <div class="text-lg font-bold" id="sum-avg">-</div>
+    </div>
+    <div class="bg-white dark:bg-gray-800 rounded-lg px-3 py-2 border border-gray-100 dark:border-gray-700 text-center">
+        <div class="text-xs text-emerald-400">최강 섹터</div>
+        <div class="text-sm font-bold truncate" id="sum-best">-</div>
+    </div>
+    <div class="bg-white dark:bg-gray-800 rounded-lg px-3 py-2 border border-gray-100 dark:border-gray-700 text-center">
+        <div class="text-xs text-red-400">최약 섹터</div>
+        <div class="text-sm font-bold truncate" id="sum-worst">-</div>
+    </div>
+</div>
+
+<div class="flex items-center gap-3 text-xs text-gray-400 mb-2">
     <span class="inline-block w-3 h-3 rounded bg-red-500"></span> -5%
     <span class="inline-block w-3 h-3 rounded bg-gray-400"></span> 0%
     <span class="inline-block w-3 h-3 rounded bg-emerald-500"></span> +5%
+    <span class="ml-2 px-1.5 py-0.5 rounded text-xs font-bold" style="border:2px solid #f59e0b; color:#f59e0b">추천</span> = 오늘의 추천 종목
 </div>
 
 <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-2">
-    <div id="heatmapChart" role="img" aria-label="S&P 500 시장 히트맵" style="height: min(70vh, 600px)"></div>
+    <div id="heatmapChart" role="img" aria-label="S&P 500 시장 히트맵" style="height: min(70vh, 620px)"></div>
 </div>
 
 <p class="text-xs text-gray-400 mt-3 text-center">크기 = 시가총액 | 색상 = 수익률 (초록=상승, 빨강=하락) | 클릭하면 종목 상세로 이동</p>
@@ -32,96 +76,192 @@
 {% block scripts %}
 <script>
 let heatmapChart = null;
+let currentData = null;
+let currentPeriod = '1d';
+let sizeMode = 'mcap';
 
 function loadHeatmap(period) {
-    // 버튼 활성화 상태 변경
+    currentPeriod = period;
+    // 버튼 활성화
     document.querySelectorAll('#period-btns button').forEach(btn => {
-        if (btn.dataset.period === period) {
-            btn.className = 'px-3.5 py-1.5 rounded-lg text-sm font-medium bg-indigo-500 text-white shadow-sm';
-        } else {
-            btn.className = 'px-3.5 py-1.5 rounded-lg text-sm font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200';
-        }
+        btn.className = btn.dataset.period === period
+            ? 'px-3 py-1.5 rounded-lg text-sm font-medium bg-indigo-500 text-white shadow-sm'
+            : 'px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200';
     });
 
     fetch(`/api/heatmap?period=${period}`).then(r => r.json()).then(data => {
-        if (!heatmapChart) heatmapChart = initChart('heatmapChart');
-        if (!heatmapChart || !data.sectors.length) return;
+        currentData = data;
+        updateSectorFilter(data.sectors);
+        updateSummary(data.summary);
+        renderChart(data);
+    }).catch(e => console.error('Heatmap error:', e));
+}
 
-        // 수익률 → 색상 변환
-        function retColor(r) {
-            if (r >= 3) return '#16a34a';
-            if (r >= 1.5) return '#22c55e';
-            if (r >= 0.5) return '#4ade80';
-            if (r >= 0) return '#86efac';
-            if (r >= -0.5) return '#fca5a5';
-            if (r >= -1.5) return '#f87171';
-            if (r >= -3) return '#ef4444';
-            return '#dc2626';
-        }
+function setSizeMode(mode) {
+    sizeMode = mode;
+    document.querySelectorAll('#size-btns button').forEach(btn => {
+        btn.className = btn.dataset.size === mode
+            ? 'px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-500 text-white shadow-sm'
+            : 'px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200';
+    });
+    if (currentData) renderChart(currentData);
+}
 
-        const treeData = data.sectors.map(sector => ({
-            name: sector.name,
-            children: sector.children.map(s => ({
+function applySectorFilter() {
+    if (currentData) renderChart(currentData);
+}
+
+function updateSectorFilter(sectors) {
+    const sel = document.getElementById('sector-filter');
+    const current = sel.value;
+    sel.innerHTML = '<option value="all">전체 섹터</option>';
+    sectors.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.name;
+        opt.textContent = `${s.name} (${s.return_pct > 0 ? '+' : ''}${s.return_pct}%)`;
+        sel.appendChild(opt);
+    });
+    sel.value = current;
+}
+
+function updateSummary(summary) {
+    const cards = document.getElementById('summary-cards');
+    if (!summary) { cards.style.display = 'none'; return; }
+    cards.style.display = '';
+
+    document.getElementById('sum-total').textContent = summary.total_stocks;
+    document.getElementById('sum-up').textContent = summary.up_count;
+    document.getElementById('sum-down').textContent = summary.down_count;
+    document.getElementById('sum-breadth').textContent = summary.market_breadth + '%';
+
+    const avgEl = document.getElementById('sum-avg');
+    avgEl.textContent = (summary.avg_return > 0 ? '+' : '') + summary.avg_return + '%';
+    avgEl.className = 'text-lg font-bold ' + (summary.avg_return >= 0 ? 'text-emerald-500' : 'text-red-500');
+
+    document.getElementById('sum-best').textContent = summary.best_sector + ' ' + (summary.best_sector_return > 0 ? '+' : '') + summary.best_sector_return + '%';
+    document.getElementById('sum-worst').textContent = summary.worst_sector + ' ' + (summary.worst_sector_return > 0 ? '+' : '') + summary.worst_sector_return + '%';
+}
+
+function retColor(r) {
+    if (r >= 3) return '#16a34a';
+    if (r >= 1.5) return '#22c55e';
+    if (r >= 0.5) return '#4ade80';
+    if (r >= 0) return '#86efac';
+    if (r >= -0.5) return '#fca5a5';
+    if (r >= -1.5) return '#f87171';
+    if (r >= -3) return '#ef4444';
+    return '#dc2626';
+}
+
+function renderChart(data) {
+    if (!heatmapChart) heatmapChart = initChart('heatmapChart');
+    if (!heatmapChart || !data.sectors.length) return;
+
+    const sectorFilter = document.getElementById('sector-filter').value;
+    const recSet = new Set(data.recommended_tickers || []);
+
+    const filteredSectors = sectorFilter === 'all'
+        ? data.sectors
+        : data.sectors.filter(s => s.name === sectorFilter);
+
+    const treeData = filteredSectors.map(sector => ({
+        name: sector.name,
+        children: sector.children.map(s => {
+            const isRec = recSet.has(s.ticker);
+            return {
                 name: s.ticker || s.name,
-                value: s.value,
+                value: sizeMode === 'equal' ? 1 : s.value,
                 return_pct: s.return_pct,
                 ticker: s.ticker,
                 stock_name: s.stock_name,
                 price: s.price,
-                itemStyle: { color: retColor(s.return_pct) },
-            })),
-        }));
-
-        heatmapChart.setOption({
-            tooltip: {
-                formatter: function(info) {
-                    const d = info.data;
-                    if (!d || !d.ticker) return info.name;
-                    const color = d.return_pct > 0 ? '#10b981' : d.return_pct < 0 ? '#ef4444' : '#6b7280';
-                    return `<div style="font-size:13px">
-                        <strong>${d.ticker}</strong> ${d.stock_name}<br/>
-                        <span style="color:${color}; font-weight:700; font-size:15px">${d.return_pct > 0 ? '+' : ''}${d.return_pct}%</span><br/>
-                        $${d.price.toLocaleString(undefined, {minimumFractionDigits:2})}<br/>
-                        시총 $${d.value.toFixed(0)}B
-                    </div>`;
+                rsi: s.rsi,
+                per: s.per,
+                is_recommended: isRec,
+                rec_rank: s.rec_rank,
+                itemStyle: {
+                    color: retColor(s.return_pct),
+                    borderColor: isRec ? '#f59e0b' : 'rgba(255,255,255,0.3)',
+                    borderWidth: isRec ? 3 : 1,
                 },
-                backgroundColor: 'rgba(15,23,42,0.95)',
-                borderColor: 'rgba(99,102,241,0.3)',
-                textStyle: { color: '#e2e8f0' },
-                extraCssText: 'border-radius:10px; box-shadow:0 4px 16px rgba(0,0,0,0.3)',
-            },
-            series: [{
-                type: 'treemap',
-                data: treeData,
-                roam: false,
-                nodeClick: false,
-                breadcrumb: { show: true, top: 4, itemStyle: { color: '#f1f5f9', textStyle: { color: '#64748b', fontSize: 11 } } },
-                levels: [
-                    { // 섹터
-                        itemStyle: { borderWidth: 2, borderColor: '#fff', gapWidth: 2 },
-                        upperLabel: { show: true, height: 24, fontSize: 12, fontWeight: 600, color: '#334155', backgroundColor: 'rgba(241,245,249,0.9)', padding: [4, 8] },
-                    },
-                    { // 종목
-                        itemStyle: { borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)', gapWidth: 1 },
-                        label: { show: true, fontSize: 10, formatter: function(p) { return p.data.ticker ? p.data.ticker + '\n' + (p.data.return_pct > 0 ? '+' : '') + p.data.return_pct + '%' : p.name; }, color: '#fff', textShadowColor: 'rgba(0,0,0,0.5)', textShadowBlur: 3 },
-                    },
-                ],
-                visualMin: -5,
-                visualMax: 5,
-                color: ['#dc2626', '#ef4444', '#f87171', '#fca5a5', '#d1d5db', '#86efac', '#4ade80', '#22c55e', '#16a34a'],
-                leafDepth: 2,
-                label: { show: true },
-            }],
-            animationDuration: 1000,
-        });
+            };
+        }),
+    }));
 
-        // 클릭 시 종목 상세로 이동
-        heatmapChart.on('click', function(params) {
-            if (params.data && params.data.ticker) {
-                window.location.href = '/stock/' + params.data.ticker;
-            }
-        });
-    }).catch(e => console.error('Heatmap error:', e));
+    heatmapChart.setOption({
+        tooltip: {
+            formatter: function(info) {
+                const d = info.data;
+                if (!d || !d.ticker) return info.name;
+                const color = d.return_pct > 0 ? '#10b981' : d.return_pct < 0 ? '#ef4444' : '#6b7280';
+                let html = `<div style="font-size:13px">`;
+
+                if (d.is_recommended) {
+                    html += `<span style="background:#f59e0b;color:#000;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:700">추천 #${d.rec_rank}</span><br/>`;
+                }
+
+                html += `<strong>${d.ticker}</strong> ${d.stock_name}<br/>`;
+                html += `<span style="color:${color};font-weight:700;font-size:15px">${d.return_pct > 0 ? '+' : ''}${d.return_pct}%</span><br/>`;
+                html += `$${d.price.toLocaleString(undefined, {minimumFractionDigits:2})}`;
+                html += ` | 시총 $${d.value.toFixed(0)}B`;
+
+                if (d.rsi != null) {
+                    const rsiColor = d.rsi < 30 ? '#10b981' : d.rsi > 70 ? '#ef4444' : '#6b7280';
+                    html += `<br/><span style="color:${rsiColor}">RSI ${d.rsi}</span>`;
+                }
+                if (d.per != null) {
+                    html += ` | PER ${d.per}`;
+                }
+
+                html += `</div>`;
+                return html;
+            },
+            backgroundColor: 'rgba(15,23,42,0.95)',
+            borderColor: 'rgba(99,102,241,0.3)',
+            textStyle: { color: '#e2e8f0' },
+            extraCssText: 'border-radius:10px; box-shadow:0 4px 16px rgba(0,0,0,0.3)',
+        },
+        series: [{
+            type: 'treemap',
+            data: treeData,
+            roam: false,
+            nodeClick: false,
+            breadcrumb: { show: true, top: 4, itemStyle: { color: '#f1f5f9', textStyle: { color: '#64748b', fontSize: 11 } } },
+            levels: [
+                { // 섹터
+                    itemStyle: { borderWidth: 2, borderColor: '#fff', gapWidth: 2 },
+                    upperLabel: { show: true, height: 24, fontSize: 12, fontWeight: 600, color: '#334155', backgroundColor: 'rgba(241,245,249,0.9)', padding: [4, 8] },
+                },
+                { // 종목
+                    itemStyle: { borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)', gapWidth: 1 },
+                    label: {
+                        show: true, fontSize: 10,
+                        formatter: function(p) {
+                            if (!p.data.ticker) return p.name;
+                            let lbl = p.data.ticker + '\n' + (p.data.return_pct > 0 ? '+' : '') + p.data.return_pct + '%';
+                            if (p.data.is_recommended) lbl = '★ ' + lbl;
+                            return lbl;
+                        },
+                        color: '#fff', textShadowColor: 'rgba(0,0,0,0.5)', textShadowBlur: 3,
+                    },
+                },
+            ],
+            visualMin: -5,
+            visualMax: 5,
+            color: ['#dc2626', '#ef4444', '#f87171', '#fca5a5', '#d1d5db', '#86efac', '#4ade80', '#22c55e', '#16a34a'],
+            leafDepth: 2,
+            label: { show: true },
+        }],
+        animationDuration: 800,
+    }, true);
+
+    // 클릭 핸들러 (중복 방지)
+    heatmapChart.off('click');
+    heatmapChart.on('click', function(params) {
+        if (params.data && params.data.ticker) {
+            window.location.href = '/stock/' + params.data.ticker;
+        }
+    });
 }
 
 // 초기 로드
