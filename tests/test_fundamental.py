@@ -197,6 +197,51 @@ class TestFundamentalEdgeCases:
         assert _score_debt(None, None) == 3.5
 
 
+class TestScoreEvEbitda:
+    """_score_ev_ebitda 테스트."""
+
+    def test_none_returns_neutral(self):
+        from src.analysis.fundamental import _score_ev_ebitda
+        assert _score_ev_ebitda(None) == 5.0
+
+    def test_negative_ebitda(self):
+        from src.analysis.fundamental import _score_ev_ebitda
+        assert _score_ev_ebitda(-5.0) == 3.0
+
+    def test_very_cheap(self):
+        from src.analysis.fundamental import _score_ev_ebitda
+        assert _score_ev_ebitda(6.0) == 9.0
+
+    def test_cheap(self):
+        from src.analysis.fundamental import _score_ev_ebitda
+        assert _score_ev_ebitda(10.0) == 8.0
+
+    def test_fair(self):
+        from src.analysis.fundamental import _score_ev_ebitda
+        assert _score_ev_ebitda(14.0) == 7.0
+
+    def test_normal(self):
+        from src.analysis.fundamental import _score_ev_ebitda
+        assert _score_ev_ebitda(18.0) == 5.0
+
+    def test_expensive(self):
+        from src.analysis.fundamental import _score_ev_ebitda
+        assert _score_ev_ebitda(25.0) == 4.0
+
+    def test_very_expensive(self):
+        from src.analysis.fundamental import _score_ev_ebitda
+        assert _score_ev_ebitda(35.0) == 3.0
+
+    def test_ev_ebitda_in_composite(self):
+        """EV/EBITDA가 composite에 반영된다."""
+        records = [FinancialRecord(period="2024Q2")]
+        val_cheap = ValuationRecord(date=date(2024, 6, 30), ev_ebitda=6.0)
+        val_expensive = ValuationRecord(date=date(2024, 6, 30), ev_ebitda=35.0)
+        score_cheap = analyze_fundamentals(records, val_cheap)
+        score_expensive = analyze_fundamentals(records, val_expensive)
+        assert score_cheap.composite_score > score_expensive.composite_score
+
+
 class TestScoreFcf:
     """_score_fcf 테스트."""
 

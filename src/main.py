@@ -331,6 +331,7 @@ def history_recommendations() -> None:
         table.add_column("점수", justify="right")
         table.add_column("1D", justify="right")
         table.add_column("5D", justify="right")
+        table.add_column("10D", justify="right")
         table.add_column("20D", justify="right")
 
         for r in recs:
@@ -338,10 +339,11 @@ def history_recommendations() -> None:
             ticker = ticker_map.get(r.stock_id, f"#{r.stock_id}")
             r1 = f"{float(r.return_1d):+.1f}%" if r.return_1d else "-"
             r5 = f"{float(r.return_5d):+.1f}%" if r.return_5d else "-"
+            r10 = f"{float(r.return_10d):+.1f}%" if r.return_10d else "-"
             r20 = f"{float(r.return_20d):+.1f}%" if r.return_20d else "-"
             table.add_row(
                 str(d), str(r.rank), ticker,
-                f"{float(r.total_score):.1f}", r1, r5, r20,
+                f"{float(r.total_score):.1f}", r1, r5, r10, r20,
             )
 
         console.print(table)
@@ -905,7 +907,14 @@ def ml_evaluate() -> None:
         result = evaluate_model(session)
 
     console.print(f"상태: {result['status']}")
-    console.print(f"메시지: {result['message']}")
+    if "message" in result:
+        console.print(f"메시지: {result['message']}")
+    if "accuracy" in result:
+        console.print(f"정확도: {result['accuracy']}%")
+        console.print(f"Precision@10: {result['precision_at_10']}%")
+        console.print(f"양수 예측 평균 수익: {result['avg_return_positive']}%")
+        console.print(f"음수 예측 평균 수익: {result['avg_return_negative']}%")
+        console.print(f"평가 기간: {result['data_days']}일, {result['total_predictions']}건")
 
 
 # ──────────────────────────────────────────

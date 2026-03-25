@@ -29,11 +29,15 @@ NEGATIVE_KEYWORDS = [
 ]
 
 
-def analyze_macro(macro: MacroData) -> int:
+def analyze_macro(
+    macro: MacroData,
+    previous_macro: MacroData | None = None,
+) -> int:
     """매크로 환경 종합 점수를 산출한다 (1-10).
 
     높을수록 투자에 유리한 환경.
     유효 지표가 5개 미만이면 중립(5) 반환.
+    previous_macro가 제공되면 전일 대비 추세 보정을 적용한다.
     """
     # 완전성 검증: 유효 지표 수 확인
     valid_count = sum(1 for v in [macro.vix, macro.sp500_close, macro.us_10y_yield, macro.dollar_index, macro.sp500_sma20] if v is not None)
@@ -75,7 +79,55 @@ def analyze_macro(macro: MacroData) -> int:
         elif macro.dollar_index < 95:
             score += 1.0  # 약달러 = 수출 순풍
 
+    # 전일 대비 추세 보정
+    if previous_macro is not None:
+        score += _macro_trend_adjustment(macro, previous_macro)
+
     return max(1, min(10, round(score)))
+
+
+def _macro_trend_adjustment(
+    current: MacroData,
+    previous: MacroData,
+) -> float:
+    """전일 대비 매크로 추세 보정값을 계산한다.
+
+    VIX 하락, 금리 하락, 달러 약세, S&P 상승 → 양수 보정.
+    """
+    adj = 0.0
+
+    # VIX 추세: 3pt 이상 변화 시 보정
+    if current.vix is not None and previous.vix is not None:
+        vix_delta = current.vix - previous.vix
+        if vix_delta <= -3.0:
+            adj += 0.5  # 공포 완화
+        elif vix_delta >= 3.0:
+            adj -= 0.5  # 공포 급등
+
+    # 10Y 금리 추세: 0.1 이상 변화 시 보정
+    if current.us_10y_yield is not None and previous.us_10y_yield is not None:
+        yield_delta = current.us_10y_yield - previous.us_10y_yield
+        if yield_delta <= -0.1:
+            adj += 0.3  # 금리 하락 = 완화
+        elif yield_delta >= 0.1:
+            adj -= 0.3  # 금리 상승 = 긴축
+
+    # 달러 인덱스 추세: 1.0 이상 변화 시 보정
+    if current.dollar_index is not None and previous.dollar_index is not None:
+        dx_delta = current.dollar_index - previous.dollar_index
+        if dx_delta <= -1.0:
+            adj += 0.3  # 달러 약세 = 유리
+        elif dx_delta >= 1.0:
+            adj -= 0.3  # 달러 강세 = 역풍
+
+    # S&P 500 전일대비 방향
+    if current.sp500_close is not None and previous.sp500_close is not None:
+        if current.sp500_close > previous.sp500_close:
+            adj += 0.3
+        elif current.sp500_close < previous.sp500_close:
+            adj -= 0.3
+
+    return adj
 
 
 def _news_time_decay(published_at: datetime, now: datetime | None = None) -> float:

@@ -36,12 +36,13 @@ class FundamentalScore:
 _WEIGHTS = {
     "per": 0.15,
     "peg": 0.10,
-    "pbr": 0.10,
+    "pbr": 0.05,
     "roe": 0.18,
     "debt": 0.10,
     "dividend": 0.07,
     "growth": 0.12,
-    "fcf": 0.18,
+    "fcf": 0.13,
+    "ev_ebitda": 0.10,
 }
 
 
@@ -209,6 +210,25 @@ def _score_fcf(
         score -= 1.5
 
     return max(1.0, min(10.0, score))
+
+
+def _score_ev_ebitda(ev_ebitda: float | None) -> float:
+    """EV/EBITDA 점수 (낮을수록 저평가). 1-10."""
+    if ev_ebitda is None:
+        return 5.0  # 데이터 없으면 중립
+    if ev_ebitda < 0:
+        return 3.0  # 음수 EBITDA
+    if ev_ebitda < 8:
+        return 9.0
+    if ev_ebitda < 12:
+        return 8.0
+    if ev_ebitda < 16:
+        return 7.0
+    if ev_ebitda < 20:
+        return 5.0
+    if ev_ebitda < 30:
+        return 4.0
+    return 3.0
 
 
 def _score_peg(per: float | None, growth_rate: float) -> float:
@@ -427,6 +447,7 @@ def analyze_fundamentals(
         latest_fin.operating_cashflow, latest_fin.net_income, latest_fin.total_assets,
         sector_fcf_median=sector_fcf_med,
     )
+    ev_ebitda_score = _score_ev_ebitda(valuation.ev_ebitda if valuation else None)
 
     # PEG 점수: growth_rate 계산 (YoY 우선, QoQ fallback)
     revenues = [f.revenue for f in financials]
@@ -448,6 +469,7 @@ def analyze_fundamentals(
         + growth_score * _WEIGHTS["growth"]
         + dividend_score * _WEIGHTS["dividend"]
         + fcf_score * _WEIGHTS["fcf"]
+        + ev_ebitda_score * _WEIGHTS["ev_ebitda"]
     )
 
     return FundamentalScore(

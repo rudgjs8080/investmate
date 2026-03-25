@@ -53,6 +53,60 @@ class TestAnalyzeMacro:
         assert analyze_macro(macro) == 5
 
 
+class TestMacroTrend:
+    """매크로 추세 보정 테스트."""
+
+    def _base_macro(self, **overrides):
+        defaults = dict(date=date.today(), vix=20.0, sp500_close=5000.0, sp500_sma20=4900.0, us_10y_yield=4.0, dollar_index=100.0)
+        defaults.update(overrides)
+        return MacroData(**defaults)
+
+    def test_no_previous_same_as_before(self):
+        """previous_macro=None이면 기존 스냅샷 로직과 동일."""
+        macro = self._base_macro()
+        assert analyze_macro(macro) == analyze_macro(macro, None)
+
+    def test_vix_declining_bonus(self):
+        """VIX 3pt 이상 하락 → +0.5 보정."""
+        macro = self._base_macro(vix=18.0)
+        prev = self._base_macro(vix=22.0)  # 4pt 하락
+        score_with_trend = analyze_macro(macro, prev)
+        score_no_trend = analyze_macro(macro)
+        assert score_with_trend >= score_no_trend
+
+    def test_vix_rising_penalty(self):
+        """VIX 3pt 이상 상승 → -0.5 보정."""
+        macro = self._base_macro(vix=25.0)
+        prev = self._base_macro(vix=20.0)  # 5pt 상승
+        score_with_trend = analyze_macro(macro, prev)
+        score_no_trend = analyze_macro(macro)
+        assert score_with_trend <= score_no_trend
+
+    def test_yield_declining_bonus(self):
+        """금리 0.1 이상 하락 → +0.3 보정 (완화 신호)."""
+        macro = self._base_macro(us_10y_yield=3.8)
+        prev = self._base_macro(us_10y_yield=4.0)  # 0.2 하락
+        score_with = analyze_macro(macro, prev)
+        score_without = analyze_macro(macro)
+        assert score_with >= score_without
+
+    def test_sp500_rising_bonus(self):
+        """S&P 500 전일대비 상승 → +0.3."""
+        macro = self._base_macro(sp500_close=5100.0)
+        prev = self._base_macro(sp500_close=5000.0)
+        score_with = analyze_macro(macro, prev)
+        score_without = analyze_macro(macro)
+        assert score_with >= score_without
+
+    def test_combined_negative_trend(self):
+        """VIX 급등 + 금리 상승 + 달러 강세 + S&P 하락 → 큰 감점."""
+        macro = self._base_macro(vix=28.0, us_10y_yield=4.5, dollar_index=103.0, sp500_close=4800.0)
+        prev = self._base_macro(vix=22.0, us_10y_yield=4.2, dollar_index=100.0, sp500_close=5000.0)
+        score_with = analyze_macro(macro, prev)
+        score_without = analyze_macro(macro)
+        assert score_with < score_without
+
+
 class TestNewsSentiment:
     def test_positive_news(self):
         from datetime import datetime

@@ -171,6 +171,7 @@ def screen_and_rank(
     market_score: int = 5,
     news_sentiment: float = 0.0,
     sector_momentum: dict[str, float] | None = None,
+    rs_ranks: dict[int, float] | None = None,
 ) -> list[RecommendationData]:
     """S&P 500 전 종목을 스크리닝하고 랭킹한다.
 
@@ -279,7 +280,8 @@ def screen_and_rank(
                 market_score, news_sentiment,
                 sector_momentum, stock.sector,
             )
-            mom_score = _score_momentum(df, latest, vix=current_vix)
+            rs_pct = rs_ranks.get(stock.stock_id) if rs_ranks else None
+            mom_score = _score_momentum(df, latest, vix=current_vix, rs_percentile=rs_pct)
 
             total = (
                 tech_score * weights["technical"]
@@ -865,7 +867,11 @@ def _score_external(
 
 
 def _score_momentum(
-    df: pd.DataFrame, latest: pd.Series, *, vix: float | None = None,
+    df: pd.DataFrame,
+    latest: pd.Series,
+    *,
+    vix: float | None = None,
+    rs_percentile: float | None = None,
 ) -> float:
     """가격 모멘텀 점수 (1-10).
 
@@ -873,6 +879,8 @@ def _score_momentum(
     - VIX > 30 (위기): 평균 회귀 모드 (양수 수익률 감점, 음수 보상)
     - VIX < 12 (과열): 모멘텀 증폭 (더 가파른 보간)
     - 12 <= VIX <= 30: 기존 행동 유지
+
+    rs_percentile: S&P 500 대비 상대 강도 백분위 (0-100).
     """
     score = 5.0
 
@@ -916,6 +924,15 @@ def _score_momentum(
     if vol_sma is not None and not pd.isna(vol_sma) and vol_sma > 0:
         if vol > vol_sma * 1.5:
             score += 0.5  # 거래량 급증
+
+    # 상대 강도 (RS) 보정
+    if rs_percentile is not None:
+        if rs_percentile > 80:
+            score += 1.5  # 시장 대비 강세 리더
+        elif rs_percentile > 60:
+            score += 0.5  # 시장 대비 우위
+        elif rs_percentile < 20:
+            score -= 1.0  # 시장 대비 열위
 
     return max(1.0, min(10.0, score))
 

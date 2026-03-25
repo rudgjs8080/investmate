@@ -489,7 +489,21 @@ class DailyPipeline:
                 sp500_sma20=float(macro.sp500_sma20) if macro.sp500_sma20 else None,
             )
 
-            market_score = analyze_macro(macro_data)
+            # 전일 매크로 조회 (추세 분석용)
+            previous_macro_data = None
+            prev = MacroRepository.get_previous(session, self.run_date_id)
+            if prev is not None:
+                previous_macro_data = MacroData(
+                    date=self.target_date,
+                    vix=float(prev.vix) if prev.vix else None,
+                    us_10y_yield=float(prev.us_10y_yield) if prev.us_10y_yield else None,
+                    us_13w_yield=float(prev.us_13w_yield) if prev.us_13w_yield else None,
+                    dollar_index=float(prev.dollar_index) if prev.dollar_index else None,
+                    sp500_close=float(prev.sp500_close) if prev.sp500_close else None,
+                    sp500_sma20=float(prev.sp500_sma20) if prev.sp500_sma20 else None,
+                )
+
+            market_score = analyze_macro(macro_data, previous_macro_data)
             macro.market_score = market_score
             session.flush()
 
@@ -554,16 +568,53 @@ class DailyPipeline:
                 except Exception as e:
                     logger.warning("step4 섹터 모멘텀 계산 실패: %s", e)
 
+            # 상대 강도 (RS) 계산
+            rs_ranks = None
+            try:
+                from src.analysis.relative_strength import calculate_rs_ranks
+                rs_ranks = calculate_rs_ranks(session, self.target_date)
+                if rs_ranks:
+                    logger.info("상대 강도 계산 완료: %d 종목", len(rs_ranks))
+            except Exception as e:
+                logger.warning("RS 계산 실패: %s", e)
+
             recommendations = screen_and_rank(
                 session, self.target_date,
                 top_n=self.top_n,
                 market_score=market_score or 5,
                 sector_momentum=sector_mom,
+                rs_ranks=rs_ranks,
             )
 
             if not recommendations:
                 logger.info("스크리닝 결과: 추천 종목 없음")
                 return 0
+
+            # ML 리랭킹 (데이터 충분 시 자동 활성화)
+            try:
+                from src.ml.scorer import MLScorer
+                ml_scorer = MLScorer()
+                if ml_scorer.is_ready(session):
+                    cand_dicts = [
+                        {"stock_id": r.stock_id, "ticker": r.ticker,
+                         "total_score": r.total_score}
+                        for r in recommendations
+                    ]
+                    reranked = ml_scorer.rank(session, cand_dicts)
+                    # 재랭킹된 점수/순위 반영
+                    score_map = {d["stock_id"]: d["total_score"] for d in reranked}
+                    for i, r in enumerate(recommendations):
+                        if r.stock_id in score_map:
+                            r.total_score = score_map[r.stock_id]
+                    recommendations.sort(key=lambda x: x.total_score, reverse=True)
+                    for i, r in enumerate(recommendations):
+                        r.rank = i + 1
+                    logger.info("ML 리랭킹 적용 완료")
+                else:
+                    status = ml_scorer.get_status(session)
+                    logger.info("ML: %s", status["status"])
+            except Exception as e:
+                logger.debug("ML 리랭킹 스킵: %s", e)
 
             if recommendations:
                 # 같은 날짜 기존 추천 삭제 (재실행 시 중복 방지)
@@ -672,6 +723,50 @@ class DailyPipeline:
 
         with get_session(self.engine) as session:
             report = assemble_enriched_report(session, self.target_date, self.run_date_id)
+
+            # 어제 대비 비교
+            diff_summary = None
+            try:
+                from src.reports.comparator import compare_recommendations, format_diff_summary
+                from src.db.models import FactDailyRecommendation, DimStock
+
+                # 전일 추천 조회
+                prev_recs = (
+                    session.query(FactDailyRecommendation)
+                    .filter(FactDailyRecommendation.run_date_id < self.run_date_id)
+                    .order_by(FactDailyRecommendation.run_date_id.desc())
+                    .limit(20)
+                    .all()
+                )
+                if prev_recs:
+                    prev_date_id = prev_recs[0].run_date_id
+                    prev_recs = [r for r in prev_recs if r.run_date_id == prev_date_id]
+
+                    ticker_map = {s.stock_id: s.ticker for s in session.query(DimStock).all()}
+                    name_map = {s.stock_id: s.name for s in session.query(DimStock).all()}
+
+                    today_list = [
+                        {"ticker": r.ticker, "name": r.name or r.ticker, "rank": r.rank}
+                        for r in report.recommendations
+                    ]
+                    yesterday_list = [
+                        {"ticker": ticker_map.get(r.stock_id, "?"), "name": name_map.get(r.stock_id, "?"), "rank": r.rank}
+                        for r in prev_recs
+                    ]
+
+                    prev_macro = MacroRepository.get_by_date_id(session, prev_date_id) if hasattr(MacroRepository, 'get_by_date_id') else None
+                    prev_market_score = prev_macro.market_score if prev_macro and prev_macro.market_score else 5
+
+                    diff = compare_recommendations(
+                        today_list, yesterday_list,
+                        today_market_score=report.macro.market_score or 5,
+                        yesterday_market_score=prev_market_score,
+                    )
+                    diff_summary = format_diff_summary(diff)
+                    if diff.has_changes:
+                        console.print(f"  [dim]vs 어제: {diff_summary}[/dim]")
+            except Exception as e:
+                logger.debug("리포트 비교 스킵: %s", e)
 
         # 터미널 출력
         try:

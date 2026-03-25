@@ -2,6 +2,35 @@
 
 ## [Unreleased]
 
+### 백로그 4사이클 구현 (2026-03-24)
+
+#### Cycle 1: Quick Wins
+- `src/analysis/fundamental.py`: EV/EBITDA 스코어링 추가 (`_score_ev_ebitda`, 가중치 10%, PBR 10%→5%, FCF 18%→13%)
+- `src/analysis/external.py`: 매크로 추세 분석 — 전일 대비 VIX/금리/달러/S&P 변화 보정 (`_macro_trend_adjustment`)
+- `src/pipeline.py`: `MacroRepository.get_previous()` 조회하여 추세 데이터 전달
+- `src/main.py`: `history recommendations` 테이블에 return_10d 컬럼 추가
+
+#### Cycle 2: 상대 강도 (Relative Strength)
+- `src/analysis/relative_strength.py` 생성: S&P 500 대비 63일 상대 성과 백분위 (0-100)
+- `src/analysis/screener.py`: `_score_momentum()`에 RS 백분위 반영 (>80: +1.5, >60: +0.5, <20: -1.0)
+- `src/pipeline.py`: STEP 4에서 RS 계산 후 `screen_and_rank()`에 전달
+
+#### Cycle 3: 리포트 히스토리 비교
+- `src/reports/comparator.py` 생성: `ReportDiff` 비교 모델 + `compare_recommendations()` + `format_diff_summary()`
+- `src/pipeline.py`: STEP 5에서 전일 추천 조회하여 변동 요약 출력
+
+#### Cycle 4: ML 파이프라인 연결
+- `src/ml/evaluator.py`: 스텁 → 실제 구현 (정확도, Precision@10, 양수/음수 평균 수익률)
+- `src/pipeline.py`: STEP 4 후 `MLScorer.is_ready()` 체크 → 자동 ML 리랭킹 (rule 70% + ML 30%)
+- `src/main.py`: `ml evaluate` CLI 출력 확장
+
+#### 백로그 정리
+- 이전 세션에서 이미 구현된 5개 항목 확인: 섹터 PER/PBR, 현금흐름, 지지/저항, 포트폴리오, NLP 감성
+- TODO.md 전면 업데이트
+
+- 테스트 43개 추가: EV/EBITDA 9, 매크로 추세 6, RS 12, 비교 13, ML 평가 3
+- **최종: 765 tests**
+
 ### AI 예측 정교화 2시간 루프 (2026-03-21)
 - `src/db/models.py`: `FactAIFeedback` 테이블 추가 (예측 vs 실제 추적)
 - `src/ai/feedback.py` 생성: AI 피드백 수집 + 성과 분석 (승률/방향정확도/섹터별/신뢰도별)

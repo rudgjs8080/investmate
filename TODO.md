@@ -52,15 +52,23 @@
 - [x] format_utils 테스트
 - [x] fail_under 50→60 상향
 
+### 루프 6 (2026-03-24) — 백로그 4사이클
+- [x] EV/EBITDA 스코어링 (fundamental.py 가중치 10%)
+- [x] 매크로 추세 분석 (전일 대비 VIX/금리/달러/S&P 변화 보정)
+- [x] return_10d 터미널 출력
+- [x] 상대 강도 (Relative Strength) 지표 (63일 S&P 500 대비)
+- [x] 리포트 히스토리 비교 (어제 vs 오늘 comparator.py)
+- [x] ML 파이프라인 연결 (자동 리랭킹 + 평가기 구현)
+
+## 이전 세션에서 이미 구현됨 (확인 완료)
+- [x] 섹터별 PER/PBR 보정 (fundamental.py build_sector_medians)
+- [x] 현금흐름 분석 (fundamental.py _score_fcf)
+- [x] 지지/저항 수준 감지 (support_resistance.py)
+- [x] 포트폴리오 시뮬레이션 (portfolio/ 모듈)
+- [x] 뉴스 감성 고도화 (sentiment.py LLM 통합)
+
 ## 미래 과제 (백로그)
-- [ ] 섹터별 PER/PBR 보정 (IT PER 25 vs Utilities PER 12)
-- [ ] EV/EBITDA 스코어링
-- [ ] 현금흐름 분석 (영업현금흐름 vs 순이익)
-- [ ] ML 모듈 실제 구현 (60일 데이터 축적 후)
-- [ ] 상대 강도 (Relative Strength) 지표
-- [ ] 지지/저항 수준 감지
-- [ ] 매크로 추세 분석 (전일 대비 VIX/금리 변화)
-- [ ] 리포트 히스토리 비교 (어제 vs 오늘)
-- [ ] 포트폴리오 시뮬레이션
-- [ ] 뉴스 감성 고도화 (NLP 기반)
-- [ ] return_10d 터미널 출력
+- [ ] ML 모델 자동 학습 트리거 (7일 경과 시 재학습)
+- [ ] Walk-Forward 교차검증 강화
+- [ ] 리포트 마크다운에 "vs 어제" 비교 섹션 추가
+- [ ] 리포트 터미널에 RS 백분위 표시
