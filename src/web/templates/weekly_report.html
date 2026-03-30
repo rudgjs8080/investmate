@@ -4,7 +4,14 @@
 {% block content %}
 <div class="space-y-6">
 
-    <!-- 헤더 -->
+    <!-- Breadcrumb -->
+    <nav class="text-sm text-gray-500 dark:text-gray-400">
+        <a href="/weekly-reports" class="hover:text-indigo-500 transition">주간 리포트 목록</a>
+        <span class="mx-1">/</span>
+        <span class="text-gray-900 dark:text-gray-100 font-medium">{{ week_id }}</span>
+    </nav>
+
+    <!-- 헤더 + Prev/Next -->
     <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
         <div>
             <h1 class="text-2xl font-bold">주간 투자 리포트</h1>
@@ -14,14 +21,14 @@
             </p>
             {% endif %}
         </div>
-        {% if available_reports|length > 1 %}
-        <select onchange="if(this.value) location.href='/weekly-report?year='+this.value.split('-W')[0]+'&week='+parseInt(this.value.split('W')[1])"
-                class="text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-1.5">
-            {% for r in available_reports %}
-            <option value="{{ r }}" {% if report and r == report.year|string ~ '-W' ~ '%02d'|format(report.week_number) %}selected{% endif %}>{{ r }}</option>
-            {% endfor %}
-        </select>
-        {% endif %}
+        <div class="flex items-center gap-2">
+            {% if prev_id %}
+            <a href="/weekly-report/{{ prev_id }}" class="px-3 py-1.5 text-sm rounded-lg border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 transition">&larr; {{ prev_id }}</a>
+            {% endif %}
+            {% if next_id %}
+            <a href="/weekly-report/{{ next_id }}" class="px-3 py-1.5 text-sm rounded-lg border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 transition">{{ next_id }} &rarr;</a>
+            {% endif %}
+        </div>
     </div>
 
     {% if not report %}
@@ -380,6 +387,24 @@
             <p class="text-gray-500 text-sm">AI 리뷰 데이터 없음</p>
             {% endif %}
         </div>
+
+        <!-- 이번 주 할 일 -->
+        {% if report.action_items %}
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-5">
+            <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold mb-3">이번 주 할 일</div>
+            <div class="space-y-3">
+                {% for item in report.action_items %}
+                <div class="flex gap-3 items-start">
+                    <span class="flex-shrink-0 w-6 h-6 rounded-full bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 text-xs font-bold flex items-center justify-center">{{ item.priority }}</span>
+                    <div>
+                        <div class="text-sm font-semibold">{{ item.action }}</div>
+                        <div class="text-xs text-gray-500 mt-0.5">{{ item.rationale }}</div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
 
         <!-- 다음 주 전망 -->
         <div class="bg-gradient-to-br from-indigo-50 to-purple-50 dark:from-indigo-900/20 dark:to-purple-900/20 rounded-xl border border-indigo-100 dark:border-indigo-800 p-5">

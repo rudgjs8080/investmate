@@ -78,6 +78,7 @@ def _save_markdown(report: WeeklyReport, path: Path) -> None:
     _render_ai_accuracy(lines, report)
     _render_win_rate_trend(lines, report)
     _render_week_over_week(lines, report)
+    _render_action_items(lines, report)
     _render_outlook(lines, report)
 
     _w("---")
@@ -345,6 +346,18 @@ def _render_ai_accuracy(lines: list[str], report: WeeklyReport) -> None:
 # ──────────────────────────────────────────
 # 섹션 8: Outlook
 # ──────────────────────────────────────────
+
+
+def _render_action_items(lines: list[str], report: WeeklyReport) -> None:
+    _w = lines.append
+    if not report.action_items:
+        return
+    _w("## 이번 주 할 일")
+    _w("")
+    for item in report.action_items:
+        _w(f"**{item.priority}.** {item.action}")
+        _w(f"   > {item.rationale}")
+        _w("")
 
 
 def _render_outlook(lines: list[str], report: WeeklyReport) -> None:

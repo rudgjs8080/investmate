@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}주간 리포트 목록{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+
+    <div>
+        <h1 class="text-2xl font-bold">주간 투자 리포트</h1>
+        <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">매주 시장 분석과 추천 종목 성과를 확인하세요</p>
+    </div>
+
+    {% if not reports %}
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-12 text-center">
+        <p class="text-gray-500 dark:text-gray-400 text-lg mb-2">주간 리포트가 없습니다</p>
+        <p class="text-sm text-gray-400"><code>investmate report weekly</code> 를 먼저 실행하세요.</p>
+    </div>
+    {% else %}
+
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {% for r in reports %}
+        <a href="/weekly-report/{{ r.week_id }}"
+           class="block bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 hover:border-indigo-300 dark:hover:border-indigo-600 hover:shadow-md transition-all p-5 group">
+
+            <!-- 헤더 -->
+            <div class="flex justify-between items-start mb-3">
+                <div>
+                    <div class="text-lg font-bold group-hover:text-indigo-500 transition">{{ r.week_id }}</div>
+                    <div class="text-xs text-gray-400">{{ r.week_start }} ~ {{ r.week_end }}</div>
+                </div>
+                <span class="text-[10px] px-2 py-0.5 rounded-full font-semibold
+                    {% if r.regime == 'bull' %}bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400
+                    {% elif r.regime == 'bear' %}bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400
+                    {% elif r.regime == 'crisis' %}bg-red-200 text-red-800 dark:bg-red-900/50 dark:text-red-300
+                    {% else %}bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300{% endif %}">
+                    {% if r.regime == 'bull' %}강세{% elif r.regime == 'bear' %}약세{% elif r.regime == 'crisis' %}위기{% else %}횡보{% endif %}
+                </span>
+            </div>
+
+            <!-- KPI 그리드 -->
+            <div class="grid grid-cols-2 gap-2 mb-3">
+                <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2 text-center">
+                    <div class="text-[10px] text-gray-400 uppercase">S&P 500</div>
+                    <div class="text-sm font-bold {% if r.sp500_return and r.sp500_return > 0 %}text-emerald-500{% elif r.sp500_return and r.sp500_return < 0 %}text-red-500{% endif %}">
+                        {% if r.sp500_return is not none %}{{ '%+.1f'|format(r.sp500_return) }}%{% else %}-{% endif %}
+                    </div>
+                </div>
+                <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2 text-center">
+                    <div class="text-[10px] text-gray-400 uppercase">VIX</div>
+                    <div class="text-sm font-bold {% if r.vix_end and r.vix_end > 25 %}text-red-500{% elif r.vix_end and r.vix_end > 20 %}text-amber-500{% else %}text-emerald-500{% endif %}">
+                        {% if r.vix_end is not none %}{{ '%.1f'|format(r.vix_end) }}{% else %}-{% endif %}
+                    </div>
+                </div>
+                <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2 text-center">
+                    <div class="text-[10px] text-gray-400 uppercase">승률</div>
+                    <div class="text-sm font-bold {% if r.win_rate and r.win_rate >= 50 %}text-emerald-500{% elif r.win_rate %}text-red-500{% endif %}">
+                        {% if r.win_rate is not none %}{{ '%.0f'|format(r.win_rate) }}%{% else %}-{% endif %}
+                    </div>
+                </div>
+                <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2 text-center">
+                    <div class="text-[10px] text-gray-400 uppercase">평균 수익</div>
+                    <div class="text-sm font-bold {% if r.avg_return and r.avg_return > 0 %}text-emerald-500{% elif r.avg_return and r.avg_return < 0 %}text-red-500{% endif %}">
+                        {% if r.avg_return is not none %}{{ '%+.2f'|format(r.avg_return) }}%{% else %}-{% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- 하단 정보 -->
+            <div class="flex justify-between items-center text-xs text-gray-400">
+                <span>추천 {{ r.total_picks }}개 | 확신 {{ r.conviction_count }}개</span>
+                <span>{{ r.trading_days }}거래일</span>
+            </div>
+        </a>
+        {% endfor %}
+    </div>
+
+    {% endif %}
+</div>
+{% endblock %}

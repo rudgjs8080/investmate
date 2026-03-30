@@ -55,7 +55,7 @@ def generate_vix_chart(
         fig.tight_layout()
 
         path = output_dir / "vix_chart.png"
-        fig.savefig(str(path), dpi=150, bbox_inches="tight")
+        fig.savefig(str(path), dpi=200, bbox_inches="tight")
         plt.close(fig)
         return path
     except Exception as e:
@@ -95,7 +95,7 @@ def generate_signal_chart(
         fig.tight_layout()
 
         path = output_dir / "signal_chart.png"
-        fig.savefig(str(path), dpi=150, bbox_inches="tight")
+        fig.savefig(str(path), dpi=200, bbox_inches="tight")
         plt.close(fig)
         return path
     except Exception as e:
@@ -129,7 +129,7 @@ def generate_sector_chart(
         fig.tight_layout()
 
         path = output_dir / "sector_chart.png"
-        fig.savefig(str(path), dpi=150, bbox_inches="tight")
+        fig.savefig(str(path), dpi=200, bbox_inches="tight")
         plt.close(fig)
         return path
     except Exception as e:
@@ -161,7 +161,7 @@ def generate_macro_score_chart(
         fig.tight_layout()
 
         path = output_dir / "macro_score_chart.png"
-        fig.savefig(str(path), dpi=150, bbox_inches="tight")
+        fig.savefig(str(path), dpi=200, bbox_inches="tight")
         plt.close(fig)
         return path
     except Exception as e:

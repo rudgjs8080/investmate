@@ -188,6 +188,18 @@ def _send_email(message: str, run_date: date) -> bool:
         return False
 
 
+def _smart_excerpt(text: str, max_len: int = 300) -> str:
+    """문장 경계에서 자르는 스마트 excerpt."""
+    if not text or len(text) <= max_len:
+        return text or ""
+    cut = text[:max_len]
+    for sep in (".", "!", "?", "。"):
+        last = cut.rfind(sep)
+        if last > max_len // 2:
+            return cut[:last + 1]
+    return cut.rstrip() + "..."
+
+
 def send_weekly_report_email(
     year: int,
     week_number: int,
@@ -197,14 +209,16 @@ def send_weekly_report_email(
     win_rate_pct: float | None = None,
     pdf_path: str | None = None,
     commentary_excerpt: str | None = None,
+    conviction_picks: list[dict] | None = None,
+    dashboard_url: str | None = None,
 ) -> bool:
     """주간 리포트 PDF를 첨부하여 이메일로 전송한다."""
     import os
     import smtplib
+    from email import encoders
     from email.mime.base import MIMEBase
     from email.mime.multipart import MIMEMultipart
     from email.mime.text import MIMEText
-    from email import encoders
     from pathlib import Path
 
     smtp_user = os.getenv("INVESTMATE_SMTP_USER")
@@ -214,43 +228,106 @@ def send_weekly_report_email(
         logger.warning("이메일 설정 없음 — 주간 리포트 이메일 스킵")
         return False
 
-    # HTML 본문
+    week_id = f"{year}-W{week_number:02d}"
+
+    # KPI 문자열
     sp500_str = f"S&P 500: {sp500_return_pct:+.1f}%" if sp500_return_pct is not None else ""
     vix_str = f"VIX: {vix_end:.1f}" if vix_end is not None else ""
     win_str = f"승률: {win_rate_pct:.0f}%" if win_rate_pct is not None else ""
     kpis = " | ".join(filter(None, [sp500_str, vix_str, win_str]))
 
+    # 확신 종목 HTML
+    picks_html = ""
+    if conviction_picks:
+        picks_rows = ""
+        for p in conviction_picks[:3]:
+            ticker = p.get("ticker", "")
+            days = p.get("days_recommended", 0)
+            ai = p.get("ai_consensus", "-")
+            ret = p.get("weekly_return_pct")
+            ret_str = f"{ret:+.2f}%" if ret is not None else "-"
+            color = "#10b981" if ret and ret > 0 else ("#ef4444" if ret and ret < 0 else "#6b7280")
+            picks_rows += f"""
+            <tr>
+                <td style="padding:6px 8px;font-weight:bold;">{ticker}</td>
+                <td style="padding:6px 8px;text-align:center;">{days}일</td>
+                <td style="padding:6px 8px;text-align:center;">{ai}</td>
+                <td style="padding:6px 8px;text-align:center;color:{color};font-weight:bold;">{ret_str}</td>
+            </tr>"""
+        picks_html = f"""
+        <div style="margin:12px 0;">
+            <p style="font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">확신 종목 TOP 3</p>
+            <table style="width:100%;border-collapse:collapse;font-size:13px;border:1px solid #e5e7eb;">
+                <tr style="background:#f9fafb;">
+                    <th style="padding:6px 8px;text-align:left;">종목</th>
+                    <th style="padding:6px 8px;text-align:center;">추천일</th>
+                    <th style="padding:6px 8px;text-align:center;">AI</th>
+                    <th style="padding:6px 8px;text-align:center;">수익률</th>
+                </tr>
+                {picks_rows}
+            </table>
+        </div>"""
+
+    # AI 코멘터리 excerpt
     commentary_html = ""
     if commentary_excerpt:
-        excerpt = commentary_excerpt[:300].replace("\n", "<br>")
-        commentary_html = f"<p style='color:#6b7280;font-size:13px;margin-top:12px;'>{excerpt}...</p>"
+        excerpt = _smart_excerpt(commentary_excerpt, 300).replace("\n", "<br>")
+        commentary_html = f"<p style='color:#4b5563;font-size:13px;margin:12px 0;line-height:1.6;'>{excerpt}</p>"
+
+    # CTA 버튼
+    cta_html = ""
+    if dashboard_url:
+        cta_html = f"""
+        <div style="text-align:center;margin:16px 0;">
+            <a href="{dashboard_url}/weekly-report/{week_id}" style="display:inline-block;background:#6366f1;color:white;text-decoration:none;padding:10px 24px;border-radius:8px;font-size:13px;font-weight:bold;">대시보드에서 보기</a>
+        </div>"""
 
     html_body = f"""
-    <div style="font-family:'Malgun Gothic','NanumGothic',sans-serif;max-width:600px;margin:0 auto;">
+    <div style="font-family:'Malgun Gothic','NanumGothic','Apple SD Gothic Neo',sans-serif;max-width:600px;margin:0 auto;">
         <div style="background:linear-gradient(135deg,#6366f1,#06b6d4);padding:24px;border-radius:12px 12px 0 0;">
-            <h2 style="color:white;margin:0;">Investmate 주간 리포트</h2>
-            <p style="color:rgba(255,255,255,0.85);margin:4px 0 0;">{year}-W{week_number:02d}</p>
+            <h2 style="color:white;margin:0;font-size:18px;">Investmate 주간 리포트</h2>
+            <p style="color:rgba(255,255,255,0.85);margin:4px 0 0;font-size:14px;">{week_id}</p>
         </div>
-        <div style="background:white;padding:20px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px;">
-            <p style="font-size:15px;font-weight:bold;color:#1f2937;">{market_oneliner}</p>
-            <p style="color:#6b7280;font-size:13px;">{kpis}</p>
+        <div style="background:white;padding:20px;border:1px solid #e5e7eb;border-top:none;">
+            <p style="font-size:15px;font-weight:bold;color:#1f2937;margin:0 0 8px;">{market_oneliner}</p>
+            <p style="color:#6b7280;font-size:13px;margin:0 0 12px;">{kpis}</p>
             {commentary_html}
-            <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0;">
-            <p style="color:#9ca3af;font-size:11px;">
-                {"PDF가 첨부되어 있습니다. 상세 내용은 첨부 파일을 확인하세요." if pdf_path else ""}
+            {picks_html}
+            {cta_html}
+        </div>
+        <div style="background:#f9fafb;padding:16px 20px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px;">
+            <p style="color:#9ca3af;font-size:11px;margin:0;">
+                {"PDF가 첨부되어 있습니다." if pdf_path else ""} 상세 내용은 첨부 파일 또는 대시보드를 확인하세요.
             </p>
-            <p style="color:#9ca3af;font-size:10px;">※ 본 리포트는 투자 참고용이며 투자 권유가 아닙니다.</p>
+            <p style="color:#d1d5db;font-size:10px;margin:6px 0 0;">※ 본 리포트는 투자 참고용이며 투자 권유가 아닙니다.</p>
         </div>
     </div>
     """
 
+    # Plain text fallback
+    plain_parts = [
+        f"[Investmate] {week_id} 주간 투자 리포트",
+        f"\n{market_oneliner}",
+        f"\n{kpis}" if kpis else "",
+    ]
+    if conviction_picks:
+        plain_parts.append("\n확신 종목:")
+        for p in conviction_picks[:3]:
+            plain_parts.append(f"  - {p.get('ticker', '')} ({p.get('ai_consensus', '-')})")
+    plain_parts.append("\n※ 본 리포트는 투자 참고용이며 투자 권유가 아닙니다.")
+    plain_text = "\n".join(plain_parts)
+
     try:
         msg = MIMEMultipart("mixed")
-        msg["Subject"] = f"[Investmate] {year}-W{week_number:02d} 주간 투자 리포트"
+        msg["Subject"] = f"[Investmate] {week_id} 주간 투자 리포트"
         msg["From"] = smtp_user
         msg["To"] = to_email
 
-        msg.attach(MIMEText(html_body, "html", "utf-8"))
+        # HTML + plain text alternative
+        alt = MIMEMultipart("alternative")
+        alt.attach(MIMEText(plain_text, "plain", "utf-8"))
+        alt.attach(MIMEText(html_body, "html", "utf-8"))
+        msg.attach(alt)
 
         # PDF 첨부
         if pdf_path:
@@ -260,12 +337,9 @@ def send_weekly_report_email(
                 part.set_payload(pdf_file.read_bytes())
                 encoders.encode_base64(part)
                 part.add_header(
-                    "Content-Disposition",
-                    "attachment",
-                    filename=pdf_file.name,
+                    "Content-Disposition", "attachment", filename=pdf_file.name,
                 )
                 msg.attach(part)
-                logger.info("PDF 첨부 완료: %s", pdf_file.name)
 
         host, port = _detect_smtp_provider(smtp_user)
         with smtplib.SMTP_SSL(host, port) as server:

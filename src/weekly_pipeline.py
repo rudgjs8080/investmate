@@ -219,6 +219,15 @@ class WeeklyPipeline:
         from src.alerts.notifier import send_weekly_report_email
 
         es = report.executive_summary
+        picks_data = [
+            {
+                "ticker": c.ticker,
+                "days_recommended": c.days_recommended,
+                "ai_consensus": c.ai_consensus,
+                "weekly_return_pct": c.weekly_return_pct,
+            }
+            for c in report.conviction_picks[:5]
+        ]
         send_weekly_report_email(
             year=self.year,
             week_number=self.week,
@@ -227,7 +236,8 @@ class WeeklyPipeline:
             vix_end=es.vix_end,
             win_rate_pct=es.weekly_win_rate_pct,
             pdf_path=str(pdf_path) if pdf_path else None,
-            commentary_excerpt=commentary[:300] if commentary else None,
+            commentary_excerpt=commentary,
+            conviction_picks=picks_data,
         )
 
     def _send_notification(self, report: object | None) -> None:

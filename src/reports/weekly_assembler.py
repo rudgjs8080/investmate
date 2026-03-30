@@ -29,6 +29,7 @@ from src.reports.weekly_models import (
     ConvictionTechnical,
     RiskDashboard,
     SectorRotationEntry,
+    WeeklyActionItem,
     WeeklyAIAccuracy,
     WeeklyBestWorstDetail,
     WeeklyExecutiveSummary,
@@ -80,6 +81,9 @@ def assemble_weekly_report(
     win_rate_trend = _build_win_rate_trend(session, year, week_number)
     conviction_techs = _build_conviction_technicals(session, conviction_picks, date_ids)
     wow = _build_week_over_week(perf_review, prev_date_ids, session)
+    action_items = _build_action_items(
+        regime_end_obj, conviction_picks, sector_rotation, perf_review,
+    )
 
     return WeeklyReport(
         year=year,
@@ -101,6 +105,7 @@ def assemble_weekly_report(
         win_rate_trend=win_rate_trend,
         conviction_technicals=conviction_techs,
         week_over_week=wow,
+        action_items=action_items,
     )
 
 
@@ -1205,3 +1210,62 @@ def _build_week_over_week(
         new_sectors_in=new_in,
         sectors_out=out,
     )
+
+
+def _build_action_items(
+    regime: MarketRegime,
+    conviction_picks: tuple[ConvictionPick, ...],
+    sector_rotation: tuple[SectorRotationEntry, ...],
+    perf: WeeklyPerformanceReview,
+) -> tuple[WeeklyActionItem, ...]:
+    """체제/확신종목/섹터/승률 기반 3개 액션 아이템을 생성한다."""
+    items: list[WeeklyActionItem] = []
+
+    # 1. 시장 체제 기반 전략
+    regime_actions = {
+        "bull": ("모멘텀 종목 중심 분할 매수 진행", "강세장에서는 추세 추종이 유리합니다"),
+        "bear": ("현금 비중 50% 이상으로 확대", "약세장에서는 자본 보전이 최우선입니다"),
+        "range": ("기술적 지지선 근처에서 소액 분할 매수", "횡보장에서는 저점 매수 전략이 효과적입니다"),
+        "crisis": ("신규 매수 보류, 기존 포지션 손절 라인 점검", "위기 시 현금 확보가 최우선입니다"),
+    }
+    action, rationale = regime_actions.get(regime.regime, regime_actions["range"])
+    items.append(WeeklyActionItem(priority=1, action=action, rationale=rationale))
+
+    # 2. 확신 종목 기반
+    if conviction_picks:
+        top = conviction_picks[0]
+        items.append(WeeklyActionItem(
+            priority=2,
+            action=f"{top.ticker} ({top.name}) 관심 종목으로 편입 검토",
+            rationale=f"{top.days_recommended}일 연속 추천, 평균 점수 {top.avg_total_score:.1f}/10",
+        ))
+    else:
+        items.append(WeeklyActionItem(
+            priority=2,
+            action="확신 종목 부재 — 관망 유지",
+            rationale="이번 주 3일 이상 추천된 종목이 없어 신규 진입을 자제합니다",
+        ))
+
+    # 3. 섹터 기반
+    hot = [s for s in sector_rotation if s.weekly_return_pct and s.weekly_return_pct > 1.0]
+    cold = [s for s in sector_rotation if s.weekly_return_pct and s.weekly_return_pct < -1.0]
+    if hot:
+        items.append(WeeklyActionItem(
+            priority=3,
+            action=f"{hot[0].sector} 섹터 비중 확대 검토",
+            rationale=f"주간 {hot[0].weekly_return_pct:+.1f}% 상승, 모멘텀 {hot[0].momentum_delta}",
+        ))
+    elif cold:
+        items.append(WeeklyActionItem(
+            priority=3,
+            action=f"{cold[0].sector} 섹터 비중 축소 검토",
+            rationale=f"주간 {cold[0].weekly_return_pct:+.1f}% 하락, 하락 모멘텀 지속",
+        ))
+    else:
+        items.append(WeeklyActionItem(
+            priority=3,
+            action="섹터 비중 현행 유지",
+            rationale="뚜렷한 섹터 로테이션 신호가 없습니다",
+        ))
+
+    return tuple(items)

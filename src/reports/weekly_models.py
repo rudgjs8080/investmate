@@ -194,6 +194,15 @@ class WeekOverWeekChange:
 
 
 @dataclass(frozen=True)
+class WeeklyActionItem:
+    """주간 실행 항목 — 이번 주 구체적 행동 제안."""
+
+    priority: int  # 1-3
+    action: str
+    rationale: str
+
+
+@dataclass(frozen=True)
 class WeeklyReport:
     """주간 리포트 최상위 모델."""
 
@@ -218,3 +227,4 @@ class WeeklyReport:
     win_rate_trend: WinRateTrend | None = None
     conviction_technicals: tuple[ConvictionTechnical, ...] = ()
     week_over_week: WeekOverWeekChange | None = None
+    action_items: tuple[WeeklyActionItem, ...] = ()
