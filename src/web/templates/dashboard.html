@@ -84,6 +84,29 @@
 </div>
 {% endif %}
 
+{% if perf_summary and perf_summary.with_data %}
+<!-- 최근 추천 성과 -->
+<div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 mb-6">
+    <div class="flex items-center gap-3 text-sm">
+        <span class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold">최근 30일 성과</span>
+        <span class="text-gray-300">|</span>
+        {% if perf_summary.win_rate_1d is not none %}
+        <span class="cursor-help" title="1거래일 후 수익을 낸 종목 비율">1일 승률: <span class="font-bold {% if perf_summary.win_rate_1d >= 50 %}text-emerald-500{% else %}text-red-500{% endif %}">{{ '%.0f'|format(perf_summary.win_rate_1d) }}%</span></span>
+        {% endif %}
+        {% if perf_summary.win_rate_5d is not none %}
+        <span class="cursor-help" title="5거래일 후 수익을 낸 종목 비율">5일 승률: <span class="font-bold {% if perf_summary.win_rate_5d >= 50 %}text-emerald-500{% else %}text-red-500{% endif %}">{{ '%.0f'|format(perf_summary.win_rate_5d) }}%</span></span>
+        {% endif %}
+        {% if perf_summary.avg_return_1d is not none %}
+        <span class="cursor-help" title="1거래일 후 평균 수익률 (거래비용 차감)">1일 평균: <span class="font-bold {% if perf_summary.avg_return_1d > 0 %}text-emerald-500{% else %}text-red-500{% endif %}">{{ '%+.2f'|format(perf_summary.avg_return_1d) }}%</span></span>
+        {% endif %}
+        {% if perf_summary.avg_return_5d is not none %}
+        <span class="cursor-help" title="5거래일 후 평균 수익률 (거래비용 차감)">5일 평균: <span class="font-bold {% if perf_summary.avg_return_5d > 0 %}text-emerald-500{% else %}text-red-500{% endif %}">{{ '%+.2f'|format(perf_summary.avg_return_5d) }}%</span></span>
+        {% endif %}
+        <span class="text-xs text-gray-400">({{ perf_summary.with_data }}/{{ perf_summary.total }}건)</span>
+    </div>
+</div>
+{% endif %}
+
 {% if recommendations %}
 <!-- 메인 2컬럼 -->
 <div class="grid lg:grid-cols-3 gap-5">
@@ -114,11 +137,11 @@
                     <div class="text-sm font-bold text-center {% if rec.total_score >= 7 %}text-emerald-500{% elif rec.total_score >= 5.5 %}text-blue-500{% else %}text-amber-500{% endif %}">{{ "%.1f"|format(rec.total_score) }}</div>
                     <div class="text-center">
                         {% if rec.ai_approved is true %}
-                            <span class="inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-700">AI {{ rec.ai_confidence or '' }}</span>
+                            <span class="inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-700 cursor-help" title="AI 신뢰도 {{ rec.ai_confidence or '?' }}/10 — AI가 이 종목을 추천할 확신 수준입니다. 7 이상이면 높은 확신, 4 이하면 낮은 확신.">AI {{ rec.ai_confidence or '' }}</span>
                         {% elif rec.ai_approved is false %}
-                            <span class="inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-100 text-red-700">제외</span>
+                            <span class="inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-100 text-red-700 cursor-help" title="AI가 이 종목을 추천에서 제외했습니다. 리스크가 높거나 매력도가 떨어진다고 판단했어요.">제외</span>
                         {% else %}
-                            <span class="text-gray-300 text-xs">-</span>
+                            <span class="text-gray-300 text-xs cursor-help" title="AI 분석이 아직 실행되지 않았습니다.">-</span>
                         {% endif %}
                     </div>
                 </a>
@@ -129,8 +152,9 @@
         <!-- 차트 2x2 -->
         <div class="grid grid-cols-2 gap-4">
             <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4">
-                <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">누적 수익률 (90일)</div>
+                <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">누적 수익률</div>
                 <div id="equityChart" style="height:200px"></div>
+                <div id="equityEmpty" class="hidden text-center text-xs text-gray-400 mt-2">데이터가 축적되면 차트가 표시됩니다</div>
             </div>
             <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4">
                 <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">VIX 추이</div>
@@ -143,6 +167,7 @@
             <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4">
                 <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">최고/최저 종목</div>
                 <div id="topWorstMini" style="height:200px"></div>
+                <div id="topWorstEmpty" class="hidden text-center text-xs text-gray-400 mt-2">수익률 데이터가 축적되면 표시됩니다</div>
             </div>
         </div>
     </div>
@@ -186,7 +211,12 @@ if (sc) sc.setOption(pieChartOption({{ sector_counts.keys() | list | tojson }}, 
 
 fetch('/api/equity-curve?days=1095').then(r=>r.json()).then(d => {
     const c = initChart('equityChart');
-    if (c && d.labels.length) c.setOption(lineChartOption(d.labels, d.values, COLORS.blue, { dataZoom: true }));
+    if (c && d.labels && d.labels.length) {
+        c.setOption(lineChartOption(d.labels, d.values, COLORS.blue, { dataZoom: true }));
+    } else {
+        const el = document.getElementById('equityEmpty');
+        if (el) el.classList.remove('hidden');
+    }
 });
 
 fetch('/api/macro-history?days=1095').then(r=>r.json()).then(d => {
@@ -199,6 +229,11 @@ fetch('/api/macro-history?days=1095').then(r=>r.json()).then(d => {
 fetch('/api/top-worst-picks?n=3&days=365').then(r=>r.json()).then(d => {
     const c = initChart('topWorstMini');
     if (!c) return;
+    if (!d.top.length && !d.worst.length) {
+        const el = document.getElementById('topWorstEmpty');
+        if (el) el.classList.remove('hidden');
+        return;
+    }
     const labels = [...d.top.map(x=>x.ticker), ...d.worst.map(x=>x.ticker)];
     const values = [...d.top.map(x=>x.return), ...d.worst.map(x=>x.return)];
     const colors = values.map(v => v > 0 ? COLORS.green : COLORS.red);

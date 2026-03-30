@@ -84,6 +84,22 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
         buy_signal_count = sum(1 for d in signals if d == "BUY")
         sell_signal_count = sum(1 for d in signals if d == "SELL")
 
+    # 최근 성과 요약
+    perf_summary = {}
+    try:
+        from src.analysis.performance import calculate_performance
+        perf = calculate_performance(db, days=30)
+        perf_summary = {
+            "win_rate_1d": perf.win_rate_1d,
+            "win_rate_5d": perf.win_rate_5d,
+            "avg_return_1d": perf.avg_return_1d,
+            "avg_return_5d": perf.avg_return_5d,
+            "total": perf.total_recommendations,
+            "with_data": perf.with_return_data,
+        }
+    except Exception:
+        pass
+
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
         "date": latest_date,
@@ -100,4 +116,5 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
         "market_score": market_score,
         "buy_signal_count": buy_signal_count,
         "sell_signal_count": sell_signal_count,
+        "perf_summary": perf_summary,
     })

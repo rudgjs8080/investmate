@@ -35,20 +35,30 @@ def health_check(db: Session = Depends(get_db)):
 
 @router.get("/equity-curve")
 def equity_curve(days: int = Query(default=365, ge=1, le=3650), db: Session = Depends(get_db)):
-    """추천 종목 누적 수익률 데이터."""
+    """추천 종목 누적 수익률 데이터 (return_20d → 5d → 1d fallback)."""
     cutoff_id = date_to_id(date.today() - timedelta(days=days))
 
     recs = db.execute(
         select(FactDailyRecommendation)
         .where(FactDailyRecommendation.run_date_id >= cutoff_id)
-        .where(FactDailyRecommendation.return_20d.isnot(None))
         .order_by(FactDailyRecommendation.run_date_id)
     ).scalars().all()
 
-    # 날짜별 평균 수익률
+    # 가용한 수익률 필드 선택 (20d → 5d → 1d fallback)
     by_date: dict[int, list[float]] = {}
+    period_label = "20일"
     for r in recs:
-        by_date.setdefault(r.run_date_id, []).append(float(r.return_20d))
+        ret = None
+        if r.return_20d is not None:
+            ret = float(r.return_20d)
+        elif r.return_5d is not None:
+            ret = float(r.return_5d)
+            period_label = "5일"
+        elif r.return_1d is not None:
+            ret = float(r.return_1d)
+            period_label = "1일"
+        if ret is not None:
+            by_date.setdefault(r.run_date_id, []).append(ret)
 
     labels = []
     values = []
@@ -62,7 +72,7 @@ def equity_curve(days: int = Query(default=365, ge=1, le=3650), db: Session = De
             labels.append(str(did))
         values.append(round(cumulative, 2))
 
-    return {"labels": labels, "values": values}
+    return {"labels": labels, "values": values, "period": period_label}
 
 
 @router.get("/sector-heatmap")
@@ -174,25 +184,43 @@ def return_distribution(days: int = Query(default=365, ge=1, le=3650), db: Sessi
 
 @router.get("/top-worst-picks")
 def top_worst_picks(n: int = Query(default=5), days: int = Query(default=365, ge=1, le=3650), db: Session = Depends(get_db)):
-    """최고/최저 수익 종목."""
+    """최고/최저 수익 종목 (return_20d → 5d → 1d fallback)."""
     cutoff_id = date_to_id(date.today() - timedelta(days=days))
 
     recs = db.execute(
         select(FactDailyRecommendation, DimStock.ticker)
         .join(DimStock, FactDailyRecommendation.stock_id == DimStock.stock_id)
         .where(FactDailyRecommendation.run_date_id >= cutoff_id)
-        .where(FactDailyRecommendation.return_20d.isnot(None))
-        .order_by(FactDailyRecommendation.return_20d.desc())
     ).all()
 
     if not recs:
-        return {"top": [], "worst": []}
+        return {"top": [], "worst": [], "period": ""}
 
-    top = [{"ticker": t, "return": float(r.return_20d)} for r, t in recs[:n]]
-    worst = [{"ticker": t, "return": float(r.return_20d)} for r, t in recs[-n:]]
+    # 가용한 수익률로 정렬
+    scored: list[tuple[str, float]] = []
+    period_label = "20일"
+    for r, ticker in recs:
+        ret = None
+        if r.return_20d is not None:
+            ret = float(r.return_20d)
+        elif r.return_5d is not None:
+            ret = float(r.return_5d)
+            period_label = "5일"
+        elif r.return_1d is not None:
+            ret = float(r.return_1d)
+            period_label = "1일"
+        if ret is not None:
+            scored.append((ticker, ret))
+
+    if not scored:
+        return {"top": [], "worst": [], "period": ""}
+
+    scored.sort(key=lambda x: x[1], reverse=True)
+    top = [{"ticker": t, "return": round(r, 2)} for t, r in scored[:n]]
+    worst = [{"ticker": t, "return": round(r, 2)} for t, r in scored[-n:]]
     worst.reverse()
 
-    return {"top": top, "worst": worst}
+    return {"top": top, "worst": worst, "period": period_label}
 
 
 @router.get("/sparkline/{ticker}")
