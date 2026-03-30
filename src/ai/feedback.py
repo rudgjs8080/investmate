@@ -245,3 +245,129 @@ def compute_ece(calibration_curve: dict[int, dict]) -> float:
         for entry in calibration_curve.values()
     )
     return round(ece, 4)
+
+
+# ──────────────────────────────────────────
+# 제약 규칙 자동 생성
+# ──────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class ConstraintRules:
+    """시장 체제/피드백 기반 AI 분석 제약 규칙."""
+
+    confidence_ceiling: int
+    max_recommendations: int
+    blocked_sectors: tuple[str, ...]
+    strong_sectors: tuple[str, ...]
+    feedback_commands: tuple[str, ...]
+    calibration_table: dict[int, float]  # {신뢰도: 실제 승률%}
+    confidence_penalty: int
+    default_action: str  # "exclude" | "neutral"
+
+
+def generate_constraint_rules(
+    session: Session,
+    vix: float | None = None,
+    regime: str = "range",
+) -> ConstraintRules:
+    """시장 체제와 과거 성과를 기반으로 AI 분석 제약 규칙을 생성한다."""
+    perf = calculate_ai_performance(session)
+    cal_curve = compute_calibration_curve(session)
+
+    # 1. VIX 기반 신뢰도 상한 (절대 9 이상 불가)
+    if vix is not None and vix >= 30:
+        ceiling = 5
+    elif vix is not None and vix >= 25:
+        ceiling = 6
+    elif vix is not None and vix >= 20:
+        ceiling = 7
+    else:
+        ceiling = 8
+
+    # 2. 체제별 추천 수 제한
+    max_recs = {"crisis": 3, "bear": 5, "range": 7, "bull": 10}.get(regime, 7)
+
+    # 3. 약점/강점 섹터
+    blocked: list[str] = []
+    strong: list[str] = []
+    if perf.sector_accuracy:
+        for sector, acc in perf.sector_accuracy.items():
+            if acc < 40:
+                blocked.append(sector)
+            elif acc > 70:
+                strong.append(sector)
+
+    # 4. 캘리브레이션 테이블
+    cal_table: dict[int, float] = {}
+    for level, entry in cal_curve.items():
+        if entry["count"] >= 3:
+            cal_table[level] = round(entry["actual"] * 100, 1)
+
+    # 5. 피드백 기반 페널티
+    penalty = 0
+    default_action = "neutral"
+    if (
+        perf.avg_return_approved is not None
+        and perf.avg_return_excluded is not None
+        and perf.avg_return_approved < perf.avg_return_excluded
+    ):
+        penalty = 2
+        default_action = "exclude"
+
+    # 6. 명령형 피드백 문장 생성
+    commands: list[str] = []
+
+    if penalty > 0:
+        commands.append(
+            f"최근 AI 추천 평균 수익({perf.avg_return_approved:+.2f}%)이 "
+            f"제외 평균({perf.avg_return_excluded:+.2f}%)보다 나쁩니다. "
+            f"신뢰도를 전체적으로 {penalty}점 낮추세요."
+        )
+        commands.append(
+            "확실한 근거가 3개 이상일 때만 추천하고, 기본적으로 제외 판정을 내리세요."
+        )
+
+    for sector in blocked:
+        acc = perf.sector_accuracy[sector] if perf.sector_accuracy else 0
+        commands.append(
+            f"{sector} 종목은 추천하지 마세요. 승률 {acc:.0f}%로 차단 기준(40%) 미만입니다."
+        )
+
+    if perf.overestimate_rate and perf.overestimate_rate > 60:
+        commands.append(
+            "목표가를 보수적으로 설정하세요. "
+            f"과거 목표가 과대추정률이 {perf.overestimate_rate:.0f}%입니다."
+        )
+
+    if perf.win_rate_approved is not None and perf.win_rate_approved < 45:
+        commands.append(
+            f"최근 추천 승률이 {perf.win_rate_approved:.0f}%로 낮습니다. "
+            "더 엄격한 기준을 적용하세요."
+        )
+
+    # 캘리브레이션 보정 지시
+    for level, actual in cal_table.items():
+        expected = level * 10
+        if actual < expected - 15:  # 15%p 이상 과대평가
+            adjusted = max(1, round(actual / 10))
+            commands.append(
+                f"신뢰도 {level}점은 실제 승률 {actual:.0f}%이므로 "
+                f"{adjusted}점 이하로 부여하세요."
+            )
+
+    if strong:
+        commands.append(
+            f"다음 섹터는 최근 성과가 우수합니다: {', '.join(strong)}. 적극 검토하세요."
+        )
+
+    return ConstraintRules(
+        confidence_ceiling=ceiling,
+        max_recommendations=max_recs,
+        blocked_sectors=tuple(blocked),
+        strong_sectors=tuple(strong),
+        feedback_commands=tuple(commands),
+        calibration_table=cal_table,
+        confidence_penalty=penalty,
+        default_action=default_action,
+    )

@@ -920,6 +920,29 @@ class DailyPipeline:
                     if st:
                         price_map[st.ticker] = float(r.price_at_recommendation)
         ai_warnings = validate_ai_results(parsed, price_map)
+
+        # 제약 규칙 강제 적용
+        try:
+            from src.ai.feedback import generate_constraint_rules
+            from src.ai.validator import enforce_constraints
+            from src.analysis.regime import detect_regime
+
+            with get_session(self.engine) as _sess:
+                _regime = detect_regime(_sess)
+                _macro = MacroRepository.get_latest(_sess)
+                _vix = float(_macro.vix) if _macro and _macro.vix else None
+                _constraints = generate_constraint_rules(
+                    _sess, vix=_vix, regime=_regime.regime,
+                )
+            constraint_warnings = enforce_constraints(parsed, _constraints, price_map)
+            ai_warnings.extend(constraint_warnings)
+            if constraint_warnings:
+                console.print(
+                    f"  [yellow]제약 적용: {len(constraint_warnings)}건 수정[/yellow]"
+                )
+        except Exception as e:
+            logger.warning("제약 규칙 적용 실패: %s", e)
+
         if ai_warnings:
             console.print(f"  [yellow]AI 검증 경고 {len(ai_warnings)}건[/yellow]")
 

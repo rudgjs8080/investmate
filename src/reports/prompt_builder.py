@@ -109,7 +109,27 @@ def build_prompt(
         except Exception:
             pass
 
-    return _render_prompt(report, enriched_data, sector_per_avgs, ai_feedback, events_data, fomc_info)
+    # 제약 규칙 생성
+    constraints = None
+    try:
+        from src.ai.feedback import generate_constraint_rules
+        from src.analysis.regime import detect_regime
+
+        regime = detect_regime(session)
+        vix = float(report.macro.vix) if report.macro.vix else None
+        constraints = generate_constraint_rules(session, vix=vix, regime=regime.regime)
+        logger.info(
+            "AI 제약: ceiling=%d, max_recs=%d, blocked=%s",
+            constraints.confidence_ceiling, constraints.max_recommendations,
+            constraints.blocked_sectors,
+        )
+    except Exception as e:
+        logger.warning("제약 규칙 생성 실패: %s", e)
+
+    return _render_prompt(
+        report, enriched_data, sector_per_avgs, ai_feedback,
+        events_data, fomc_info, constraints=constraints,
+    )
 
 
 def _translate_signal(code: str) -> str:
@@ -143,79 +163,136 @@ def _render_prompt(
     ai_feedback: object | None = None,
     events_data: dict | None = None,
     fomc_info: tuple | None = None,
+    constraints: object | None = None,
 ) -> str:
-    """EnrichedDailyReport + 보강 데이터 → 프롬프트 텍스트."""
+    """EnrichedDailyReport + 보강 데이터 + 제약 규칙 → 프롬프트 텍스트."""
     enriched_data = enriched_data or {}
     sector_per_avgs = sector_per_avgs or {}
     parts: list[str] = []
     _w = parts.append
 
-    _w("# 역할")
-    _w("당신은 월가 20년 경력의 CFA 자격 시니어 포트폴리오 매니저입니다.")
-    _w("아래는 S&P 500 전 종목을 5차원 정량 분석(기술적 25% + 기본적 25% + 수급 15% + 외부 15% + 모멘텀 20%)으로")
-    _w("스크리닝한 결과입니다. 이 데이터를 기반으로 정성적 판단을 더해주세요.")
+    # ── 시스템 프롬프트 (강제 규칙) ──
+    _w("[SYSTEM]")
+    _w("<role>")
+    _w("너는 '리스크 매니저 겸 퀀트 애널리스트'다.")
+    _w("너의 최우선 원칙은 손실 회피이며, 수익 기회보다 리스크 제어를 항상 먼저 판단한다.")
+    _w("자신감이 높을수록 좋은 것이 아니다. 근거 없는 확신은 손실이다.")
+    _w("</role>")
     _w("")
-    _w("# 분석 규칙")
-    _w("- 모든 판단에 반드시 **2개 이상의 데이터 근거**를 제시하세요 (RSI+MACD, PER+성장률 등)")
-    _w("- 각 종목에 1-10 신뢰도와 LOW/MEDIUM/HIGH 리스크를 반드시 부여하세요")
-    _w("- 신뢰도 8 이상: 반드시 3개 이상 강한 근거 제시 (예: RSI 과매도 + 실적 서프라이즈 + 애널리스트 상향)")
-    _w("- 신뢰도 5 이하: 왜 확신이 부족한지 구체적 이유 제시")
-    _w("- 매수 추천 시 반드시 3단계 분할 매수 가격대와 각 비중(%) 제시")
-    _w("- 목표가 설정 시 '왜 그 가격인지' 근거 제시 (예: 52주 고점 $200 대비 85% 수준)")
-    _w("- 손절가 설정 시 기술적 지지선 기반 근거 제시 (예: SMA60 $175 하회 시)")
-    _w("- 섹터 쏠림이 심하면 반드시 경고하고 대안 섹터 종목 제시")
-    _w("- **제외 종목에 대해서도** '어떤 조건이 바뀌면 재검토 가능한지' 제시")
-    _w("- 각 종목 분석 시 **판단 로직을 단계적으로 서술**: (1)시장 환경 고려→(2)기술적 체크→(3)밸류에이션→(4)수급→(5)종합")
+
+    # 신뢰도 상한 / 추천 수 제한
+    ceiling = constraints.confidence_ceiling if constraints else 8
+    max_recs = constraints.max_recommendations if constraints else 10
+    _w("<hard_rules>")
+    _w("아래 규칙은 '참고사항'이 아니라 반드시 따라야 하는 강제 규칙이다.")
+    _w("규칙을 위반한 추천은 무효로 간주된다.")
     _w("")
-    # AI 스타일 지시
-    try:
-        from src.config import get_settings
-        style = get_settings().ai_style
-    except Exception:
-        style = "balanced"
-    _w(f"# 투자 스타일: {style}")
-    _w(get_style_instruction(style))
+    m = report.macro
+    vix_val = f"{m.vix:.1f}" if m.vix else "N/A"
+    _w(f"## 규칙 1: 신뢰도 상한 (현재 VIX {vix_val} → 최대 {ceiling})")
+    _w(f"- 어떤 종목이든 신뢰도 {ceiling}을 초과할 수 없다.")
+    _w("- 어떤 경우에도 신뢰도 9 이상은 부여하지 마라.")
     _w("")
-    _w(f"# 데이터 기준일: {report.run_date.isoformat()}")
-    _w(f"분석 대상: S&P 500 전 종목 약 {report.total_stocks_analyzed}개 → 스크리닝 TOP {len(report.recommendations)}")
+    _w(f"## 규칙 2: 추천 수 제한 (최대 {max_recs}개)")
+    _w(f"- 이번 분석에서 추천 종목은 최대 {max_recs}개다.")
+    _w("")
+    _w("## 규칙 3: 약점 섹터 차단")
+    _w("blocked_sectors 태그 안에 나열된 섹터의 종목은 절대 추천하지 마라.")
+    _w("")
+    _w("## 규칙 4: 캘리브레이션 보정")
+    _w("calibration 태그에 과거 신뢰도별 실제 승률이 제공된다.")
+    _w("너의 직관적 신뢰도를 먼저 산출한 뒤, 캘리브레이션 테이블에 따라 반드시 하향 조정하라.")
+    _w("")
+    _w("## 규칙 5: 목표가 보수적 설정")
+    _w("- '대박 시나리오'는 제시하지 마라. 현실적 시나리오만 제시하라.")
+    _w("- 목표가 설정 시 '왜 그 가격인지' 근거를 반드시 제시하라.")
+    _w("")
+    _w("## 규칙 6: 피드백 규칙 강제 적용")
+    _w("feedback_rules 태그 안의 지시는 단순 참고가 아니라 강제 명령이다.")
+    _w("</hard_rules>")
+    _w("")
+
+    _w("<reasoning_process>")
+    _w("추천을 생성하기 전에 반드시 다음 순서로 사고하라:")
+    _w("1단계 - 시장 체제 판단: VIX, 시장 지표로 현재 체제 결정")
+    _w("2단계 - 분석 스타일 결정: 체제와 피드백 규칙에 따라 방어적/균형/공격적 선택")
+    _w("3단계 - 차단 섹터 확인: blocked_sectors 목록 먼저 확인, 해당 섹터 완전 배제")
+    _w("4단계 - 후보 종목 분석: 남은 섹터에서 후보 선정")
+    _w("5단계 - 직관적 신뢰도 산출: 각 종목에 대한 초기 신뢰도 부여")
+    _w("6단계 - 캘리브레이션 보정: 테이블 참조하여 신뢰도 하향 조정")
+    _w(f"7단계 - 상한 검증: VIX 기반 상한({ceiling}) 초과 여부 확인, 초과 시 절삭")
+    _w(f"8단계 - 추천 수 검증: 최대 {max_recs}개 초과 시 하위 신뢰도 종목부터 제거")
+    _w("9단계 - 목표가 검증: 과거 평균 수익률 대비 합리적인지 확인")
+    _w("</reasoning_process>")
+    _w("")
+
+    # ── 유저 메시지 ──
+    _w("[USER]")
     _w("")
 
     # 시장 환경
-    m = report.macro
-    _w("## 시장 환경 요약")
+    _w("<market_data>")
+    _w(f"현재 날짜: {report.run_date.isoformat()}")
     vix_str = f"{m.vix:.1f} ({m.vix_status})" if m.vix else "-"
-    _w(f"- VIX: {vix_str}")
-    _w(f"- S&P 500: {m.sp500_close:,.2f}" if m.sp500_close else "- S&P 500: -")
-    _w(f"  - 20일선 {m.sp500_trend}")
+    _w(f"VIX: {vix_str}")
+    _w(f"S&P 500: {m.sp500_close:,.2f}" if m.sp500_close else "S&P 500: -")
+    _w(f"S&P 500 추세: 20일선 {m.sp500_trend}")
     if m.us_10y_yield:
-        _w(f"- 10년 국채 금리: {m.us_10y_yield:.2f}%")
+        _w(f"10년 국채: {m.us_10y_yield:.2f}%")
     if m.yield_spread is not None:
-        _w(f"- 장단기 스프레드: {m.yield_spread:+.2f}%p")
+        _w(f"장단기 스프레드: {m.yield_spread:+.2f}%p")
     if m.dollar_index:
-        _w(f"- 달러 인덱스: {m.dollar_index:.2f}")
-    _w(f"- 시장 환경 종합 점수: {m.market_score or '-'}/10 ({m.mood})")
-    # VIX 수준 컨텍스트
-    if m.vix:
-        if m.vix < 15:
-            _w("  → VIX 매우 낮음: 시장 안일 (역사적 하위 20%), 급변 가능성 경계")
-        elif m.vix < 20:
-            _w("  → VIX 정상 범위: 안정적 시장 환경")
-        elif m.vix < 30:
-            _w("  → VIX 주의 구간: 불확실성 증가, 방어적 전략 고려")
-        else:
-            _w("  → VIX 공포 구간: 극단적 불안, 현금 비중 확대 필요")
-    _w(f"- 한줄 요약: {summarize_market(m)}")
-    # FOMC 일정
+        _w(f"달러 인덱스: {m.dollar_index:.2f}")
+    _w(f"시장 점수: {m.market_score or '-'}/10 ({m.mood})")
     if fomc_info:
         fomc_date, fomc_days = fomc_info
-        _w(f"- **다음 FOMC**: {fomc_date.isoformat()} ({fomc_days}일 후)")
-        if fomc_days <= 7:
-            _w("  → **FOMC 임박: 금리 결정 전 변동성 확대 예상, 신규 포지션 주의**")
+        _w(f"다음 FOMC: {fomc_date.isoformat()} ({fomc_days}일 후)")
+    _w(f"분석 대상: S&P 500 {report.total_stocks_analyzed}개 → TOP {len(report.recommendations)}")
+
+    # AI 스타일 결정
+    win_rate = ai_feedback.win_rate_approved if ai_feedback else None
+    style = _determine_ai_style(m.vix, win_rate, m.market_score)
+    _w(f"분석 스타일: {style}")
+    _w("</market_data>")
     _w("")
 
-    # AI 과거 성과 피드백 (자기 교정용)
+    # 캘리브레이션 테이블
+    _w("<calibration>")
+    if constraints and constraints.calibration_table:
+        _w("과거 신뢰도별 실제 승률:")
+        for level in sorted(constraints.calibration_table.keys(), reverse=True):
+            actual = constraints.calibration_table[level]
+            _w(f"- 신뢰도 {level}: 실제 승률 {actual:.0f}%")
+        _w("보정 기준: 실제 승률이 기대보다 낮은 구간은 해당 승률에 맞는 점수로 하향하라.")
+    else:
+        _w("캘리브레이션 데이터 없음 (초기 단계)")
+    _w("</calibration>")
+    _w("")
+
+    # 차단 섹터
+    _w("<blocked_sectors>")
+    if constraints and constraints.blocked_sectors:
+        for sector in constraints.blocked_sectors:
+            _w(f"- {sector}")
+        _w("(위 섹터는 최근 승률 40% 미만. 절대 추천 금지.)")
+    else:
+        _w("현재 차단 섹터 없음.")
+    _w("</blocked_sectors>")
+    _w("")
+
+    # 피드백 규칙 (명령형)
+    _w("<feedback_rules>")
+    if constraints and constraints.feedback_commands:
+        for cmd in constraints.feedback_commands:
+            _w(f"- {cmd}")
+    else:
+        _w("현재 추가 피드백 규칙 없음.")
+    _w("</feedback_rules>")
+    _w("")
+
+    # 과거 성과 수치 (참고)
     if ai_feedback and ai_feedback.total_predictions > 0:
-        _w("## 과거 AI 분석 성과 (자기 교정 참고)")
+        _w("<past_performance>")
         _w(f"- 총 예측: {ai_feedback.total_predictions}건 (추천 {ai_feedback.ai_approved_count} / 제외 {ai_feedback.ai_excluded_count})")
         if ai_feedback.win_rate_approved is not None:
             _w(f"- AI 추천 종목 승률: {ai_feedback.win_rate_approved}% (20일 기준)")
@@ -256,10 +333,11 @@ def _render_prompt(
                 _w(f"**[약점 섹터] {', '.join(weak_sectors)} — 이 섹터 추천 시 특히 신중하세요.**")
             if strong_sectors:
                 _w(f"**[강점 섹터] {', '.join(strong_sectors)} — 이 섹터에서 좋은 성과를 보이고 있습니다.**")
+        _w("</past_performance>")
         _w("")
 
     # TOP N 종목
-
+    _w("<candidate_stocks>")
     _w(f"## 스크리닝 결과 TOP {len(report.recommendations)} ({report.total_stocks_analyzed}개 중 선별)")
     _w("")
 
@@ -401,13 +479,13 @@ def _render_prompt(
                 _w(f"- **저베타 방어주**: {names} → 약세장 방어 역할")
         _w("")
 
-    # Chain-of-Thought 분석 프로세스
-    _add_chain_of_thought(parts)
+    _w("</candidate_stocks>")
+    _w("")
 
     # 분석 요청
-    _w("## 분석 요청")
+    _w("위 데이터를 기반으로 hard_rules와 reasoning_process를 엄격히 준수하여 종목 추천을 수행하라.")
     _w("")
-    _w("위 데이터를 바탕으로 **시니어 포트폴리오 매니저** 관점에서 다음을 분석해주세요:")
+    _w("## 분석 요청")
     _w("")
     _w(f"1. **시장 체제 판단**: 현재 시장이 강세/약세/횡보/전환기 중 어디에 해당하는지,")
     _w("   그 근거를 VIX, 금리, S&P 500 추세 등으로 설명해주세요.")
@@ -589,6 +667,19 @@ def build_unified_prompt(
     lines.append("Tool의 deep_dive 필드에 결과를 포함하세요.")
 
     return "\n".join(lines)
+
+
+def _determine_ai_style(
+    vix: float | None, win_rate: float | None, market_score: int | None,
+) -> str:
+    """시장 체제와 과거 성과 기반으로 AI 분석 스타일을 자동 결정한다."""
+    if (vix is not None and vix > 30) or (market_score is not None and market_score <= 3):
+        return "방어적"
+    if (vix is not None and vix > 25) or (win_rate is not None and win_rate < 45):
+        return "방어적"
+    if market_score is not None and market_score >= 7 and win_rate is not None and win_rate > 55:
+        return "균형"
+    return "방어적"
 
 
 def get_style_instruction(style: str) -> str:

@@ -92,22 +92,18 @@ class TestRenderPrompt:
 
 
 class TestChainOfThought:
-    def test_prompt_contains_chain_of_thought(self):
+    def test_prompt_contains_reasoning_process(self):
         prompt = _render_prompt(_make_report())
-        assert "분석 프로세스" in prompt
-        assert "단계적으로 사고하세요" in prompt
-        assert "시장 환경 판단" in prompt
-        assert "기술적 분석" in prompt
-        assert "펀더멘털 검증" in prompt
-        assert "수급 확인" in prompt
-        assert "리스크 평가" in prompt
-        assert "종합 판단" in prompt
+        assert "reasoning_process" in prompt
+        assert "시장 체제 판단" in prompt
+        assert "캘리브레이션 보정" in prompt
+        assert "상한 검증" in prompt
 
-    def test_prompt_contains_bull_bear(self):
+    def test_prompt_contains_hard_rules(self):
         prompt = _render_prompt(_make_report())
-        assert "Bull vs Bear" in prompt
-        assert "Bull Case" in prompt
-        assert "Bear Case" in prompt
+        assert "hard_rules" in prompt
+        assert "신뢰도 상한" in prompt
+        assert "리스크 매니저" in prompt
 
 
 class TestSignalTranslation:
