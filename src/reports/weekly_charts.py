@@ -20,7 +20,12 @@ def _setup_korean_font() -> None:
     if platform.system() == "Windows":
         plt.rcParams["font.family"] = "Malgun Gothic"
     else:
-        plt.rcParams["font.family"] = "NanumGothic"
+        # NanumGothic 또는 Noto Sans CJK 탐색
+        from pathlib import Path as _P
+        if _P("/usr/share/fonts/truetype/nanum").exists():
+            plt.rcParams["font.family"] = "NanumGothic"
+        else:
+            plt.rcParams["font.family"] = "Noto Sans CJK JP"
     plt.rcParams["axes.unicode_minus"] = False
 
 

@@ -18,6 +18,7 @@ _FONT_PATHS = [
     Path("C:/Windows/Fonts/malgun.ttf"),
     Path("/usr/share/fonts/truetype/nanum/NanumGothic.ttf"),
     Path("/usr/share/fonts/nanum/NanumGothic.ttf"),
+    Path("/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc"),
 ]
 
 _BOLD_FONT_PATHS = [
@@ -25,6 +26,7 @@ _BOLD_FONT_PATHS = [
     Path("C:/Windows/Fonts/malgunbd.ttf"),
     Path("/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf"),
     Path("/usr/share/fonts/nanum/NanumGothicBold.ttf"),
+    Path("/usr/share/fonts/google-noto-cjk/NotoSansCJK-Bold.ttc"),
 ]
 
 
