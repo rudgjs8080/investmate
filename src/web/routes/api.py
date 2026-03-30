@@ -16,6 +16,15 @@ from src.web.deps import get_db
 router = APIRouter()
 
 
+def _pick_best_return(rec: FactDailyRecommendation) -> float | None:
+    """가용한 최장 기간 수익률을 반환한다 (20d→10d→5d→1d fallback)."""
+    for attr in ("return_20d", "return_10d", "return_5d", "return_1d"):
+        val = getattr(rec, attr, None)
+        if val is not None:
+            return float(val)
+    return None
+
+
 @router.get("/health")
 def health_check(db: Session = Depends(get_db)):
     """서비스 상태 확인."""
@@ -77,20 +86,22 @@ def equity_curve(days: int = Query(default=365, ge=1, le=3650), db: Session = De
 
 @router.get("/sector-heatmap")
 def sector_heatmap(days: int = Query(default=365, ge=1, le=3650), db: Session = Depends(get_db)):
-    """섹터별 평균 수익률 히트맵 데이터."""
+    """섹터별 평균 수익률 히트맵 데이터 (return fallback)."""
     cutoff_id = date_to_id(date.today() - timedelta(days=days))
 
     recs = db.execute(
         select(FactDailyRecommendation, DimStock)
         .join(DimStock, FactDailyRecommendation.stock_id == DimStock.stock_id)
         .where(FactDailyRecommendation.run_date_id >= cutoff_id)
-        .where(FactDailyRecommendation.return_20d.isnot(None))
     ).all()
 
     sector_returns: dict[str, list[float]] = {}
     for rec, stock in recs:
+        ret = _pick_best_return(rec)
+        if ret is None:
+            continue
         sector = stock.sector.sector_name if stock.sector else "기타"
-        sector_returns.setdefault(sector, []).append(float(rec.return_20d))
+        sector_returns.setdefault(sector, []).append(ret)
 
     return {
         sector: {
@@ -158,18 +169,17 @@ def win_rates(days: int = Query(default=365, ge=1, le=3650), db: Session = Depen
 
 @router.get("/return-distribution")
 def return_distribution(days: int = Query(default=365, ge=1, le=3650), db: Session = Depends(get_db)):
-    """수익률 분포 히스토그램 데이터."""
+    """수익률 분포 히스토그램 데이터 (return fallback)."""
     cutoff_id = date_to_id(date.today() - timedelta(days=days))
     recs = db.execute(
-        select(FactDailyRecommendation.return_20d)
+        select(FactDailyRecommendation)
         .where(FactDailyRecommendation.run_date_id >= cutoff_id)
-        .where(FactDailyRecommendation.return_20d.isnot(None))
     ).scalars().all()
 
-    if not recs:
-        return {"bins": [], "counts": []}
+    returns = [r for r in (_pick_best_return(rec) for rec in recs) if r is not None]
 
-    returns = [float(r) for r in recs]
+    if not returns:
+        return {"bins": [], "counts": []}
     # 5% 구간 히스토그램
     bins = list(range(-30, 35, 5))
     counts = [0] * (len(bins) - 1)

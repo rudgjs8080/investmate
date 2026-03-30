@@ -103,14 +103,15 @@ def calculate_performance(
         best_pick = scored[0]
         worst_pick = scored[-1]
 
-    # 섹터별 평균 수익률 (20일)
+    # 섹터별 평균 수익률 (fallback: 20d → 5d → 1d)
     sector_returns: dict[str, list[float]] = {}
     for r in recs:
-        if r.return_20d is None:
+        ret = _best_return(r)
+        if ret is None:
             continue
         stock = stock_map.get(r.stock_id)
         if stock and stock.sector:
-            sector_returns.setdefault(stock.sector.sector_name, []).append(float(r.return_20d))
+            sector_returns.setdefault(stock.sector.sector_name, []).append(ret)
 
     by_sector = {
         s: round(sum(v) / len(v), 2)
@@ -118,27 +119,30 @@ def calculate_performance(
         if v
     }
 
-    # AI 승인 종목 vs 전체
-    ai_approved_returns = [float(r.return_20d) for r in recs if r.ai_approved and r.return_20d is not None]
-    all_returns_20d = [float(r.return_20d) for r in recs if r.return_20d is not None]
+    # AI 승인 종목 vs 전체 (fallback: 20d → 5d → 1d)
+    ai_approved_returns = [_best_return(r) for r in recs if r.ai_approved is True and _best_return(r) is not None]
+    ai_rejected_returns = [_best_return(r) for r in recs if r.ai_approved is False and _best_return(r) is not None]
+    all_returns = [_best_return(r) for r in recs if _best_return(r) is not None]
 
     ai_approved_avg = round(sum(ai_approved_returns) / len(ai_approved_returns), 2) if ai_approved_returns else None
-    all_avg = round(sum(all_returns_20d) / len(all_returns_20d), 2) if all_returns_20d else None
+    all_avg = round(sum(all_returns) / len(all_returns), 2) if all_returns else None
 
-    # 최근 10개
+    # 최근 30개 (종목명 포함)
     recent = []
-    for r in recs[:10]:
+    for r in recs[:30]:
         stock = stock_map.get(r.stock_id)
         recent.append({
             "date": id_to_date(r.run_date_id).isoformat(),
             "rank": r.rank,
             "ticker": stock.ticker if stock else f"#{r.stock_id}",
+            "name": stock.name if stock else "",
             "score": float(r.total_score),
             "return_1d": float(r.return_1d) if r.return_1d is not None else None,
             "return_5d": float(r.return_5d) if r.return_5d is not None else None,
             "return_10d": float(r.return_10d) if r.return_10d is not None else None,
             "return_20d": float(r.return_20d) if r.return_20d is not None else None,
             "ai_approved": r.ai_approved,
+            "ai_confidence": int(r.ai_confidence) if r.ai_confidence else None,
         })
 
     return PerformanceReport(
