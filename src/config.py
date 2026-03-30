@@ -71,6 +71,9 @@ class Settings(BaseSettings):
     ai_model_sentiment: str = Field(
         default="claude-haiku-4-5-20251001", alias="INVESTMATE_AI_MODEL_SENTIMENT",
     )
+    ai_model_commentary: str = Field(
+        default="claude-sonnet-4-20250514", alias="INVESTMATE_AI_MODEL_COMMENTARY",
+    )
     # 리스크 제어
     max_sector_pct: float = Field(default=0.4, alias="INVESTMATE_MAX_SECTOR_PCT")
     # 거래 비용 (슬리피지 + 수수료, 왕복 기준 bps)

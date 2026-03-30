@@ -24,6 +24,9 @@ dependencies = [
     "uvicorn[standard]>=0.42.0",
     "jinja2>=3.1.6",
     "tenacity>=8.2",
+    "fpdf2>=2.7",
+    "matplotlib>=3.8",
+    "anthropic>=0.40",
 ]
 
 [project.optional-dependencies]

@@ -162,6 +162,61 @@ def list_reports() -> None:
     console.print(table)
 
 
+@report.command(name="weekly", help="주간 리포트 생성")
+@click.option("--year", default=None, type=int, help="연도 (기본: 직전 주)")
+@click.option("--week", default=None, type=int, help="주차 (ISO week number)")
+@click.option("--skip-notify", is_flag=True, help="알림 발송 스킵")
+@click.option("--skip-email", is_flag=True, help="이메일 발송 스킵")
+@click.option("--force", is_flag=True, help="체크포인트 무시, 재실행")
+def weekly(year: int | None, week: int | None, skip_notify: bool, skip_email: bool, force: bool) -> None:
+    """주간 리포트를 생성한다."""
+    target_date = date.today()
+    _setup_logging(target_date)
+
+    engine = create_db_engine()
+    init_db(engine)
+
+    from src.weekly_pipeline import WeeklyPipeline
+
+    pipeline = WeeklyPipeline(
+        engine, year=year, week=week,
+        skip_notify=skip_notify, skip_email=skip_email,
+    )
+    pipeline.run(force=force)
+
+
+@report.command(name="weekly-latest", help="가장 최근 주간 리포트 출력")
+def weekly_latest() -> None:
+    """최근 주간 리포트를 출력한다."""
+    reports_dir = Path("reports/weekly")
+    if not reports_dir.exists():
+        console.print("[yellow]주간 리포트가 없습니다. 'investmate report weekly'를 먼저 실행하세요.[/yellow]")
+        return
+
+    md_files = sorted(reports_dir.glob("*.md"), reverse=True)
+    if not md_files:
+        console.print("[yellow]주간 리포트 파일이 없습니다.[/yellow]")
+        return
+
+    from rich.markdown import Markdown
+
+    console.print(Markdown(md_files[0].read_text(encoding="utf-8")))
+
+
+@report.command(name="weekly-show", help="특정 주차 주간 리포트 조회")
+@click.argument("week_id")
+def weekly_show(week_id: str) -> None:
+    """특정 주차의 주간 리포트를 출력한다. (예: 2026-W13)"""
+    md_path = Path("reports/weekly") / f"{week_id}.md"
+    if not md_path.exists():
+        console.print(f"[red]{week_id} 주간 리포트가 없습니다.[/red]")
+        return
+
+    from rich.markdown import Markdown
+
+    console.print(Markdown(md_path.read_text(encoding="utf-8")))
+
+
 # ──────────────────────────────────────────
 # stock — 개별 종목 상세
 # ──────────────────────────────────────────

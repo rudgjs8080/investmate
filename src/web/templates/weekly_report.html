@@ -1,0 +1,440 @@
+{% extends "base.html" %}
+{% block title %}주간 리포트{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+
+    <!-- 헤더 -->
+    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+        <div>
+            <h1 class="text-2xl font-bold">주간 투자 리포트</h1>
+            {% if report %}
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                {{ report.week_start }} ~ {{ report.week_end }} | 거래일 {{ report.trading_days }}일
+            </p>
+            {% endif %}
+        </div>
+        {% if available_reports|length > 1 %}
+        <select onchange="if(this.value) location.href='/weekly-report?year='+this.value.split('-W')[0]+'&week='+parseInt(this.value.split('W')[1])"
+                class="text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-1.5">
+            {% for r in available_reports %}
+            <option value="{{ r }}" {% if report and r == report.year|string ~ '-W' ~ '%02d'|format(report.week_number) %}selected{% endif %}>{{ r }}</option>
+            {% endfor %}
+        </select>
+        {% endif %}
+    </div>
+
+    {% if not report %}
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-12 text-center">
+        <p class="text-gray-500 dark:text-gray-400 text-lg">주간 리포트가 없습니다.</p>
+        <p class="text-sm text-gray-400 mt-2"><code>investmate report weekly</code> 를 먼저 실행하세요.</p>
+    </div>
+    {% else %}
+
+    {% set es = report.executive_summary %}
+    {% set pr = report.performance_review %}
+    {% set ms = report.macro_summary %}
+
+    <!-- AI 코멘터리 -->
+    {% if report.ai_commentary %}
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-5">
+        <details open>
+            <summary class="text-[10px] uppercase tracking-widest text-indigo-400 font-semibold cursor-pointer">AI 주간 코멘터리</summary>
+            <div class="mt-3 text-sm leading-relaxed text-gray-700 dark:text-gray-300 whitespace-pre-line">{{ report.ai_commentary }}</div>
+        </details>
+    </div>
+    {% endif %}
+
+    <!-- 1분 브리핑 -->
+    <div class="bg-gradient-to-r from-indigo-50 to-cyan-50 dark:from-indigo-900/20 dark:to-cyan-900/20 rounded-xl border border-indigo-100 dark:border-indigo-800 p-5">
+        <div class="text-[10px] uppercase tracking-widest text-indigo-400 font-semibold mb-2">1분 브리핑</div>
+        <p class="text-lg font-bold mb-3">{{ es.market_oneliner }}</p>
+
+        <div class="grid grid-cols-2 lg:grid-cols-5 gap-3">
+            <div class="text-center">
+                <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold">S&P 500</div>
+                <div class="text-2xl font-black {% if es.sp500_weekly_return_pct and es.sp500_weekly_return_pct > 0 %}text-emerald-500{% elif es.sp500_weekly_return_pct and es.sp500_weekly_return_pct < 0 %}text-red-500{% endif %}">
+                    {% if es.sp500_weekly_return_pct is not none %}{{ '%+.1f'|format(es.sp500_weekly_return_pct) }}%{% else %}-{% endif %}
+                </div>
+            </div>
+            <div class="text-center">
+                <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold">VIX</div>
+                <div class="text-2xl font-black {% if es.vix_end and es.vix_end > 25 %}text-red-500{% elif es.vix_end and es.vix_end > 20 %}text-amber-500{% else %}text-emerald-500{% endif %}">
+                    {% if es.vix_end is not none %}{{ '%.1f'|format(es.vix_end) }}{% else %}-{% endif %}
+                </div>
+                {% if es.vix_low is not none and es.vix_high is not none %}
+                <div class="text-xs text-gray-400">{{ '%.1f'|format(es.vix_low) }}~{{ '%.1f'|format(es.vix_high) }}</div>
+                {% endif %}
+            </div>
+            <div class="text-center">
+                <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold">체제</div>
+                <div class="text-2xl font-black">
+                    {% if es.regime_end == 'bull' %}강세{% elif es.regime_end == 'bear' %}약세{% elif es.regime_end == 'crisis' %}위기{% else %}횡보{% endif %}
+                </div>
+            </div>
+            <div class="text-center">
+                <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold">승률</div>
+                <div class="text-2xl font-black {% if es.weekly_win_rate_pct and es.weekly_win_rate_pct >= 50 %}text-emerald-500{% elif es.weekly_win_rate_pct %}text-red-500{% endif %}">
+                    {% if es.weekly_win_rate_pct is not none %}{{ '%.0f'|format(es.weekly_win_rate_pct) }}%{% else %}-{% endif %}
+                </div>
+            </div>
+            <div class="text-center">
+                <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold">평균 수익</div>
+                <div class="text-2xl font-black {% if es.weekly_avg_return_pct and es.weekly_avg_return_pct > 0 %}text-emerald-500{% elif es.weekly_avg_return_pct and es.weekly_avg_return_pct < 0 %}text-red-500{% endif %}">
+                    {% if es.weekly_avg_return_pct is not none %}{{ '%+.2f'|format(es.weekly_avg_return_pct) }}%{% else %}-{% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 주간 추천 성과 -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-5">
+        <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold mb-3">주간 추천 성과</div>
+
+        {% if pr.total_unique_picks == 0 %}
+        <p class="text-gray-500">이번 주 추천 종목이 없습니다.</p>
+        {% else %}
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+            <div class="text-center p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                <div class="text-xs text-gray-400">총 종목</div>
+                <div class="text-xl font-bold">{{ pr.total_unique_picks }}</div>
+            </div>
+            <div class="text-center p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                <div class="text-xs text-gray-400">승/패</div>
+                <div class="text-xl font-bold"><span class="text-emerald-500">{{ pr.win_count }}</span> / <span class="text-red-500">{{ pr.loss_count }}</span></div>
+            </div>
+            <div class="text-center p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                <div class="text-xs text-gray-400">베스트</div>
+                {% if pr.best_pick %}
+                <div class="text-xl font-bold text-emerald-500">{{ pr.best_pick.ticker }}</div>
+                <div class="text-xs text-emerald-500">{{ '%+.2f'|format(pr.best_pick.weekly_return_pct) }}%</div>
+                {% else %}<div class="text-xl font-bold">-</div>{% endif %}
+            </div>
+            <div class="text-center p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                <div class="text-xs text-gray-400">워스트</div>
+                {% if pr.worst_pick %}
+                <div class="text-xl font-bold text-red-500">{{ pr.worst_pick.ticker }}</div>
+                <div class="text-xs text-red-500">{{ '%+.2f'|format(pr.worst_pick.weekly_return_pct) }}%</div>
+                {% else %}<div class="text-xl font-bold">-</div>{% endif %}
+            </div>
+        </div>
+
+        <!-- 전체 종목 테이블 -->
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="border-b border-gray-100 dark:border-gray-700">
+                        <th class="text-left py-2 text-[11px] uppercase tracking-wider text-gray-400">종목</th>
+                        <th class="text-center py-2 text-[11px] uppercase tracking-wider text-gray-400">섹터</th>
+                        <th class="text-center py-2 text-[11px] uppercase tracking-wider text-gray-400">추천일수</th>
+                        <th class="text-center py-2 text-[11px] uppercase tracking-wider text-gray-400">평균순위</th>
+                        <th class="text-center py-2 text-[11px] uppercase tracking-wider text-gray-400">주간수익률</th>
+                        <th class="text-center py-2 text-[11px] uppercase tracking-wider text-gray-400">AI</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-50 dark:divide-gray-700">
+                    {% for p in pr.all_picks %}
+                    <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/30">
+                        <td class="py-2 font-semibold">{{ p.ticker }} <span class="text-gray-400 font-normal text-xs">{{ p.name }}</span></td>
+                        <td class="py-2 text-center text-xs text-gray-500">{{ p.sector or '-' }}</td>
+                        <td class="py-2 text-center">{{ p.days_recommended }}</td>
+                        <td class="py-2 text-center">{{ '%.0f'|format(p.avg_rank) }}</td>
+                        <td class="py-2 text-center font-semibold {% if p.weekly_return_pct and p.weekly_return_pct > 0 %}text-emerald-500{% elif p.weekly_return_pct and p.weekly_return_pct < 0 %}text-red-500{% endif %}">
+                            {% if p.weekly_return_pct is not none %}{{ '%+.2f'|format(p.weekly_return_pct) }}%{% else %}-{% endif %}
+                        </td>
+                        <td class="py-2 text-center text-xs">
+                            {% if p.ai_approved_days > 0 %}
+                            <span class="text-emerald-500">추천{{ p.ai_approved_days }}</span>
+                            {% elif p.ai_rejected_days > 0 %}
+                            <span class="text-red-500">제외{{ p.ai_rejected_days }}</span>
+                            {% else %}-{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- 확신 종목 -->
+    {% if report.conviction_picks %}
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-5">
+        <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold mb-3">확신 종목 (Conviction Picks)</div>
+        <p class="text-xs text-gray-500 mb-3">주 {{ report.trading_days }}거래일 중 다수 추천된 종목</p>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {% for c in report.conviction_picks %}
+            <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4 border border-gray-100 dark:border-gray-600">
+                <div class="flex justify-between items-start mb-2">
+                    <div>
+                        <span class="font-bold text-lg">{{ c.ticker }}</span>
+                        <span class="text-xs text-gray-500 ml-1">{{ c.name }}</span>
+                    </div>
+                    <span class="text-xs px-2 py-0.5 rounded-full {% if c.ai_consensus == '추천' %}bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400{% elif c.ai_consensus == '제외' %}bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400{% else %}bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400{% endif %}">
+                        {{ c.ai_consensus }}
+                    </span>
+                </div>
+                <div class="text-xs text-gray-500 mb-2">{{ c.sector or '-' }}</div>
+                <div class="grid grid-cols-2 gap-2 text-xs">
+                    <div>추천: <span class="font-semibold">{{ c.days_recommended }}일</span> (연속{{ c.consecutive_days }})</div>
+                    <div>평균순위: <span class="font-semibold">{{ '%.0f'|format(c.avg_rank) }}위</span></div>
+                    <div>평균점수: <span class="font-semibold">{{ '%.1f'|format(c.avg_total_score) }}/10</span></div>
+                    <div>수익률: <span class="font-semibold {% if c.weekly_return_pct and c.weekly_return_pct > 0 %}text-emerald-500{% elif c.weekly_return_pct and c.weekly_return_pct < 0 %}text-red-500{% endif %}">
+                        {% if c.weekly_return_pct is not none %}{{ '%+.2f'|format(c.weekly_return_pct) }}%{% else %}-{% endif %}</span>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- 섹터 로테이션 + 매크로 (2열) -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+        <!-- 섹터 로테이션 -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-5">
+            <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold mb-3">섹터 로테이션</div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="border-b border-gray-100 dark:border-gray-700">
+                            <th class="text-left py-2 text-[11px] uppercase tracking-wider text-gray-400">섹터</th>
+                            <th class="text-center py-2 text-[11px] uppercase tracking-wider text-gray-400">수익률</th>
+                            <th class="text-center py-2 text-[11px] uppercase tracking-wider text-gray-400">거래량</th>
+                            <th class="text-center py-2 text-[11px] uppercase tracking-wider text-gray-400">추천</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-50 dark:divide-gray-700">
+                        {% for s in report.sector_rotation %}
+                        <tr>
+                            <td class="py-1.5 text-xs font-medium">{{ s.sector }}</td>
+                            <td class="py-1.5 text-center text-xs font-semibold {% if s.weekly_return_pct and s.weekly_return_pct > 0 %}text-emerald-500{% elif s.weekly_return_pct and s.weekly_return_pct < 0 %}text-red-500{% endif %}">
+                                {% if s.weekly_return_pct is not none %}{{ '%+.2f'|format(s.weekly_return_pct) }}%{% else %}-{% endif %}
+                            </td>
+                            <td class="py-1.5 text-center text-xs text-gray-500">
+                                {% if s.volume_change_pct is not none %}{{ '%+.1f'|format(s.volume_change_pct) }}%{% else %}-{% endif %}
+                            </td>
+                            <td class="py-1.5 text-center text-xs">{{ s.pick_count }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 매크로 변동 -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-5">
+            <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold mb-3">매크로 환경 변동</div>
+
+            {% if ms.daily_scores %}
+            <div class="flex items-center gap-2 mb-3 text-sm">
+                <span class="text-xs text-gray-400">시장점수:</span>
+                {% for date, score in ms.daily_scores %}
+                <span class="px-2 py-0.5 rounded text-xs font-semibold {% if score and score >= 7 %}bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400{% elif score and score <= 3 %}bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400{% else %}bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300{% endif %}">
+                    {{ score or '-' }}
+                </span>
+                {% if not loop.last %}<span class="text-gray-300">→</span>{% endif %}
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="border-b border-gray-100 dark:border-gray-700">
+                        <th class="text-left py-2 text-[11px] uppercase tracking-wider text-gray-400">지표</th>
+                        <th class="text-center py-2 text-[11px] uppercase tracking-wider text-gray-400">주초</th>
+                        <th class="text-center py-2 text-[11px] uppercase tracking-wider text-gray-400">주말</th>
+                        <th class="text-center py-2 text-[11px] uppercase tracking-wider text-gray-400">변동</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-50 dark:divide-gray-700">
+                    {% macro macro_row(label, start, end, suffix='') %}
+                    {% if start is not none or end is not none %}
+                    <tr>
+                        <td class="py-1.5 text-xs">{{ label }}</td>
+                        <td class="py-1.5 text-center text-xs">{% if start is not none %}{{ '%.2f'|format(start) }}{{ suffix }}{% else %}-{% endif %}</td>
+                        <td class="py-1.5 text-center text-xs">{% if end is not none %}{{ '%.2f'|format(end) }}{{ suffix }}{% else %}-{% endif %}</td>
+                        <td class="py-1.5 text-center text-xs font-semibold {% if start is not none and end is not none and end > start %}text-emerald-500{% elif start is not none and end is not none and end < start %}text-red-500{% endif %}">
+                            {% if start is not none and end is not none %}{{ '%+.2f'|format(end - start) }}{{ suffix }}{% else %}-{% endif %}
+                        </td>
+                    </tr>
+                    {% endif %}
+                    {% endmacro %}
+                    {{ macro_row('10Y 국채', ms.us_10y_start, ms.us_10y_end, '%') }}
+                    {{ macro_row('13W 국채', ms.us_13w_start, ms.us_13w_end, '%') }}
+                    {{ macro_row('스프레드', ms.spread_start, ms.spread_end, '%p') }}
+                    {{ macro_row('달러', ms.dollar_start, ms.dollar_end) }}
+                    {{ macro_row('금 ($/oz)', ms.gold_start, ms.gold_end) }}
+                    {{ macro_row('유가 ($/bbl)', ms.oil_start, ms.oil_end) }}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- 리스크 + WoW + 4주 트렌드 -->
+    {% if report.risk_dashboard or report.week_over_week or report.win_rate_trend %}
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+        {% if report.risk_dashboard %}
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-5">
+            <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold mb-3">리스크 대시보드</div>
+            {% set rd = report.risk_dashboard %}
+            <div class="space-y-2 text-sm">
+                {% if rd.top_sector %}
+                <div class="flex justify-between"><span class="text-gray-500">섹터 집중도</span><span class="font-semibold">{{ rd.top_sector }} {{ '%.0f'|format(rd.max_sector_concentration_pct) }}%</span></div>
+                {% endif %}
+                <div class="flex justify-between"><span class="text-gray-500">VIX 노출</span><span class="font-semibold {% if rd.vix_exposure == '높음' %}text-red-500{% elif rd.vix_exposure == '보통' %}text-amber-500{% else %}text-emerald-500{% endif %}">{{ rd.vix_exposure }}</span></div>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if report.week_over_week %}
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-5">
+            <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold mb-3">전주 대비 변화</div>
+            {% set wow = report.week_over_week %}
+            <div class="space-y-2 text-sm">
+                {% if wow.win_rate_delta is not none %}
+                <div class="flex justify-between"><span class="text-gray-500">승률</span><span class="font-semibold {% if wow.win_rate_delta > 0 %}text-emerald-500{% elif wow.win_rate_delta < 0 %}text-red-500{% endif %}">{{ '%+.1f'|format(wow.win_rate_delta) }}%p</span></div>
+                {% endif %}
+                {% if wow.return_delta is not none %}
+                <div class="flex justify-between"><span class="text-gray-500">평균 수익</span><span class="font-semibold {% if wow.return_delta > 0 %}text-emerald-500{% elif wow.return_delta < 0 %}text-red-500{% endif %}">{{ '%+.2f'|format(wow.return_delta) }}%p</span></div>
+                {% endif %}
+                {% if wow.new_sectors_in %}<div class="text-xs text-emerald-500">진입: {{ wow.new_sectors_in|join(', ') }}</div>{% endif %}
+                {% if wow.sectors_out %}<div class="text-xs text-red-500">이탈: {{ wow.sectors_out|join(', ') }}</div>{% endif %}
+            </div>
+        </div>
+        {% endif %}
+
+        {% if report.win_rate_trend %}
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-5">
+            <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold mb-3">4주 승률 트렌드</div>
+            {% set wrt = report.win_rate_trend %}
+            <div class="flex items-center gap-2 mb-2">
+                {% for wid, rate in wrt.weekly_rates %}
+                <div class="text-center flex-1">
+                    <div class="text-[10px] text-gray-400">{{ wid[-3:] }}</div>
+                    <div class="text-sm font-bold {% if rate and rate >= 50 %}text-emerald-500{% elif rate %}text-red-500{% endif %}">{% if rate is not none %}{{ '%.0f'|format(rate) }}%{% else %}-{% endif %}</div>
+                </div>
+                {% if not loop.last %}<span class="text-gray-300 text-xs">→</span>{% endif %}
+                {% endfor %}
+            </div>
+            {% if wrt.four_week_avg_pct is not none %}
+            <div class="text-xs text-gray-500 text-center">4주 평균 {{ '%.1f'|format(wrt.four_week_avg_pct) }}% ({{ wrt.trend_direction }})</div>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- 시그널 트렌드 + AI 정확도 + 전망 (3열) -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+        <!-- 시그널 트렌드 -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-5">
+            <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold mb-3">시그널 트렌드</div>
+            {% if report.signal_trend.daily_buy_counts %}
+            <div id="signalChart" style="height:180px"></div>
+            {% if report.signal_trend.most_frequent_signal %}
+            <p class="text-xs text-gray-500 mt-2">최다 시그널: <span class="font-semibold">{{ report.signal_trend.most_frequent_signal }}</span></p>
+            {% endif %}
+            {% if report.signal_trend.avg_strength_change is not none %}
+            <p class="text-xs text-gray-500">강도 변화: <span class="font-semibold">{{ '%+.1f'|format(report.signal_trend.avg_strength_change) }}</span></p>
+            {% endif %}
+            {% else %}
+            <p class="text-gray-500 text-sm">시그널 데이터 없음</p>
+            {% endif %}
+        </div>
+
+        <!-- AI 정확도 -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-5">
+            <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold mb-3">AI 예측 정확도</div>
+            {% set ai = report.ai_accuracy %}
+            {% if ai.total_reviewed > 0 %}
+            <div class="space-y-3">
+                <div class="flex justify-between items-center">
+                    <span class="text-xs text-gray-500">리뷰 종목</span>
+                    <span class="font-bold text-lg">{{ ai.total_reviewed }}개</span>
+                </div>
+                {% if ai.approval_rate_pct is not none %}
+                <div class="flex justify-between items-center">
+                    <span class="text-xs text-gray-500">승인율</span>
+                    <span class="font-bold text-lg">{{ '%.1f'|format(ai.approval_rate_pct) }}%</span>
+                </div>
+                {% endif %}
+                {% if ai.direction_accuracy_pct is not none %}
+                <div class="flex justify-between items-center">
+                    <span class="text-xs text-gray-500">방향 정확도</span>
+                    <span class="font-bold text-lg {% if ai.direction_accuracy_pct >= 50 %}text-emerald-500{% else %}text-red-500{% endif %}">{{ '%.1f'|format(ai.direction_accuracy_pct) }}%</span>
+                </div>
+                {% endif %}
+                {% if ai.confidence_vs_return_corr is not none %}
+                <div class="flex justify-between items-center">
+                    <span class="text-xs text-gray-500">신뢰도-수익률 상관</span>
+                    <span class="font-bold text-lg">{{ '%.2f'|format(ai.confidence_vs_return_corr) }}</span>
+                </div>
+                {% endif %}
+            </div>
+            {% else %}
+            <p class="text-gray-500 text-sm">AI 리뷰 데이터 없음</p>
+            {% endif %}
+        </div>
+
+        <!-- 다음 주 전망 -->
+        <div class="bg-gradient-to-br from-indigo-50 to-purple-50 dark:from-indigo-900/20 dark:to-purple-900/20 rounded-xl border border-indigo-100 dark:border-indigo-800 p-5">
+            <div class="text-[10px] uppercase tracking-widest text-indigo-400 font-semibold mb-3">다음 주 전망</div>
+            {% set ol = report.outlook %}
+            <p class="text-sm font-medium mb-3">{{ ol.regime_strategy }}</p>
+            {% if ol.watchlist_sectors %}
+            <p class="text-xs text-gray-600 dark:text-gray-300 mb-1">
+                <span class="text-emerald-500 font-semibold">관심:</span> {{ ol.watchlist_sectors|join(', ') }}
+            </p>
+            {% endif %}
+            {% if ol.avoid_sectors %}
+            <p class="text-xs text-gray-600 dark:text-gray-300 mb-1">
+                <span class="text-red-500 font-semibold">주의:</span> {{ ol.avoid_sectors|join(', ') }}
+            </p>
+            {% endif %}
+            <p class="text-xs text-gray-500 dark:text-gray-400 mt-3 pt-3 border-t border-indigo-100 dark:border-indigo-800">
+                {{ ol.rebalancing_suggestion }}
+            </p>
+        </div>
+    </div>
+
+    <p class="text-xs text-gray-400 text-center">※ 본 리포트는 투자 참고용이며 투자 권유가 아닙니다. | 생성: {{ report.generated_at }}</p>
+
+    {% endif %}
+</div>
+
+{% if report and report.signal_trend and report.signal_trend.daily_buy_counts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const el = document.getElementById('signalChart');
+    if (!el) return;
+    const chart = echarts.init(el, document.documentElement.classList.contains('dark') ? 'dark' : null);
+
+    const buyData = {{ report.signal_trend.daily_buy_counts | tojson }};
+    const sellData = {{ report.signal_trend.daily_sell_counts | tojson }};
+
+    chart.setOption({
+        tooltip: { trigger: 'axis' },
+        legend: { data: ['매수', '매도'], bottom: 0, textStyle: { fontSize: 10 } },
+        grid: { top: 10, right: 10, bottom: 30, left: 35 },
+        xAxis: {
+            type: 'category',
+            data: buyData.map(d => d[0].slice(5)),
+            axisLabel: { fontSize: 10 }
+        },
+        yAxis: { type: 'value', axisLabel: { fontSize: 10 } },
+        series: [
+            { name: '매수', type: 'bar', stack: 'total', data: buyData.map(d => d[1]), itemStyle: { color: '#10b981' } },
+            { name: '매도', type: 'bar', stack: 'total', data: sellData.map(d => d[1]), itemStyle: { color: '#ef4444' } },
+        ]
+    });
+
+    window.addEventListener('resize', () => chart.resize());
+});
+</script>
+{% endif %}
+{% endblock %}
