@@ -12,21 +12,17 @@ from src.reports.weekly_models import WeeklyReport
 
 logger = logging.getLogger(__name__)
 
-# 한글 폰트 탐색 경로
+# 한글 폰트 탐색 경로 (TTF만 — fpdf2는 TTC 미지원)
 _FONT_PATHS = [
-    Path("assets/fonts/NanumGothic.ttf"),
+    Path("assets/fonts/NanumGothic-Regular.ttf"),
     Path("C:/Windows/Fonts/malgun.ttf"),
     Path("/usr/share/fonts/truetype/nanum/NanumGothic.ttf"),
-    Path("/usr/share/fonts/nanum/NanumGothic.ttf"),
-    Path("/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc"),
 ]
 
 _BOLD_FONT_PATHS = [
-    Path("assets/fonts/NanumGothicBold.ttf"),
+    Path("assets/fonts/NanumGothic-Bold.ttf"),
     Path("C:/Windows/Fonts/malgunbd.ttf"),
     Path("/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf"),
-    Path("/usr/share/fonts/nanum/NanumGothicBold.ttf"),
-    Path("/usr/share/fonts/google-noto-cjk/NotoSansCJK-Bold.ttc"),
 ]
 
 
