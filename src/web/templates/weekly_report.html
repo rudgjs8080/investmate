@@ -101,7 +101,7 @@
         {% if pr.total_unique_picks == 0 %}
         <p class="text-gray-500">이번 주 추천 종목이 없습니다.</p>
         {% else %}
-        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+        <div class="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-4">
             <div class="text-center p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
                 <div class="text-xs text-gray-400">총 종목</div>
                 <div class="text-xl font-bold">{{ pr.total_unique_picks }}</div>
@@ -112,16 +112,25 @@
             </div>
             <div class="text-center p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
                 <div class="text-xs text-gray-400">베스트</div>
-                {% if pr.best_pick %}
+                {% if pr.best_pick and pr.best_pick.weekly_return_pct is not none %}
                 <div class="text-xl font-bold text-emerald-500">{{ pr.best_pick.ticker }}</div>
                 <div class="text-xs text-emerald-500">{{ '%+.2f'|format(pr.best_pick.weekly_return_pct) }}%</div>
                 {% else %}<div class="text-xl font-bold">-</div>{% endif %}
             </div>
             <div class="text-center p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
                 <div class="text-xs text-gray-400">워스트</div>
-                {% if pr.worst_pick %}
+                {% if pr.worst_pick and pr.worst_pick.weekly_return_pct is not none %}
                 <div class="text-xl font-bold text-red-500">{{ pr.worst_pick.ticker }}</div>
                 <div class="text-xs text-red-500">{{ '%+.2f'|format(pr.worst_pick.weekly_return_pct) }}%</div>
+                {% else %}<div class="text-xl font-bold">-</div>{% endif %}
+            </div>
+            <!-- S&P 500 대비 -->
+            <div class="text-center p-3 rounded-lg {% if es.weekly_avg_return_pct is not none and es.sp500_weekly_return_pct is not none and es.weekly_avg_return_pct > es.sp500_weekly_return_pct %}bg-emerald-50 dark:bg-emerald-900/20{% else %}bg-red-50 dark:bg-red-900/20{% endif %}">
+                <div class="text-xs text-gray-400">S&P 대비</div>
+                {% if es.weekly_avg_return_pct is not none and es.sp500_weekly_return_pct is not none %}
+                {% set alpha = es.weekly_avg_return_pct - es.sp500_weekly_return_pct %}
+                <div class="text-xl font-bold {% if alpha > 0 %}text-emerald-500{% else %}text-red-500{% endif %}">{{ '%+.2f'|format(alpha) }}%</div>
+                <div class="text-[10px] text-gray-400">초과 수익</div>
                 {% else %}<div class="text-xl font-bold">-</div>{% endif %}
             </div>
         </div>
@@ -191,6 +200,16 @@
                         {% if c.weekly_return_pct is not none %}{{ '%+.2f'|format(c.weekly_return_pct) }}%{% else %}-{% endif %}</span>
                     </div>
                 </div>
+                <!-- 기술적 지표 (tech_map 연동) -->
+                {% if tech_map and tech_map[c.ticker] is defined %}
+                {% set t = tech_map[c.ticker] %}
+                <div class="mt-2 pt-2 border-t border-gray-200 dark:border-gray-600 text-[10px] text-gray-500 flex flex-wrap gap-2">
+                    {% if t.rsi_14 %}<span class="px-1.5 py-0.5 rounded {% if t.rsi_14 < 30 %}bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400{% elif t.rsi_14 > 70 %}bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400{% else %}bg-gray-100 dark:bg-gray-600{% endif %}">RSI {{ '%.0f'|format(t.rsi_14) }}</span>{% endif %}
+                    <span class="px-1.5 py-0.5 rounded {% if t.macd_signal == '매수' %}bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400{% elif t.macd_signal == '매도' %}bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400{% else %}bg-gray-100 dark:bg-gray-600{% endif %}">MACD {{ t.macd_signal }}</span>
+                    <span class="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-600">{{ t.sma_alignment }}</span>
+                    <span class="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-600">BB {{ t.bb_position }}</span>
+                </div>
+                {% endif %}
             </div>
             {% endfor %}
         </div>

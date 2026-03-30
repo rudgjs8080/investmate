@@ -117,11 +117,15 @@ def assemble_weekly_report(
 def _get_week_trading_days(
     session: Session, year: int, week: int,
 ) -> tuple[list[int], list[date]]:
-    """해당 주의 거래일 date_id 목록과 date 목록을 반환한다."""
+    """해당 주의 거래일 date_id 목록과 date 목록을 반환한다 (주말/공휴일 제외)."""
     rows = (
         session.execute(
             select(DimDate.date_id, DimDate.date)
-            .where(DimDate.year == year, DimDate.week_of_year == week)
+            .where(
+                DimDate.year == year,
+                DimDate.week_of_year == week,
+                DimDate.is_trading_day.is_(True),
+            )
             .order_by(DimDate.date_id)
         )
         .all()
@@ -292,18 +296,22 @@ def _build_performance_review(
             ).scalars().all()
         }
 
-    # 주간 마지막 거래일 종가 배치 로드
-    last_date_id = date_ids[-1]
-    last_prices = {
-        p.stock_id: float(p.close)
-        for p in session.execute(
-            select(FactDailyPrice)
-            .where(
-                FactDailyPrice.stock_id.in_(stock_ids),
-                FactDailyPrice.date_id == last_date_id,
-            )
-        ).scalars().all()
-    }
+    # 주간 마지막 거래일 종가 배치 로드 (fallback: 역순으로 가격 있는 날 탐색)
+    last_prices: dict[int, float] = {}
+    for did in reversed(date_ids):
+        prices = {
+            p.stock_id: float(p.close)
+            for p in session.execute(
+                select(FactDailyPrice)
+                .where(
+                    FactDailyPrice.stock_id.in_(stock_ids),
+                    FactDailyPrice.date_id == did,
+                )
+            ).scalars().all()
+        }
+        if prices:
+            last_prices = prices
+            break
 
     # 종목별 집계
     stock_data: dict[int, dict] = defaultdict(lambda: {
@@ -442,18 +450,22 @@ def _build_conviction_picks(
             ).scalars().all()
         }
 
-    # 마지막 거래일 종가
-    last_date_id = date_ids[-1]
-    last_prices = {
-        p.stock_id: float(p.close)
-        for p in session.execute(
-            select(FactDailyPrice)
-            .where(
-                FactDailyPrice.stock_id.in_(stock_ids),
-                FactDailyPrice.date_id == last_date_id,
-            )
-        ).scalars().all()
-    }
+    # 마지막 거래일 종가 (fallback: 역순 탐색)
+    last_prices: dict[int, float] = {}
+    for did in reversed(date_ids):
+        prices = {
+            p.stock_id: float(p.close)
+            for p in session.execute(
+                select(FactDailyPrice)
+                .where(
+                    FactDailyPrice.stock_id.in_(stock_ids),
+                    FactDailyPrice.date_id == did,
+                )
+            ).scalars().all()
+        }
+        if prices:
+            last_prices = prices
+            break
 
     settings = get_settings()
     tx_cost_pct = settings.transaction_cost_bps / 10000 * 100
