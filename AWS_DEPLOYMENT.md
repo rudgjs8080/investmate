@@ -55,11 +55,11 @@
 
 시작하기 전에 아래 3가지를 준비하세요:
 
-| 준비물 | 설명 | 없으면? |
-|--------|------|---------|
-| **AWS 계정** | 신용카드 등록 필요 (Free Tier 내에서는 과금 없음) | [STEP 1](#5-step-1--aws-계정-생성-및-초기-보안-설정)에서 만듭니다 |
-| **SSH 터미널** | 서버에 접속할 프로그램 | Windows: [MobaXterm](https://mobaxterm.mobatek.net/) 또는 PowerShell / Mac: 기본 터미널 |
-| **프로젝트 Git 저장소** | investmate 코드가 올라간 GitHub/GitLab 등 | 미리 `git push` 해두세요 |
+| 준비물                  | 설명                                              | 없으면?                                                                                 |
+| ----------------------- | ------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| **AWS 계정**            | 신용카드 등록 필요 (Free Tier 내에서는 과금 없음) | [STEP 1](#5-step-1--aws-계정-생성-및-초기-보안-설정)에서 만듭니다                       |
+| **SSH 터미널**          | 서버에 접속할 프로그램                            | Windows: [MobaXterm](https://mobaxterm.mobatek.net/) 또는 PowerShell / Mac: 기본 터미널 |
+| **프로젝트 Git 저장소** | investmate 코드가 올라간 GitHub/GitLab 등         | 미리 `git push` 해두세요                                                                |
 
 > **참고**: 텔레그램 알림을 받고 싶다면 텔레그램 봇 토큰도 준비하세요 (선택사항).
 
@@ -114,13 +114,13 @@
 
 ### 우리가 사용할 무료 서비스
 
-| 서비스 | 무료 한도 | 우리가 쓸 양 | 남는 양 |
-|--------|-----------|-------------|---------|
-| **EC2** (서버) | 매월 750시간 | ~720시간 (24/7) | 여유 |
-| **EBS** (디스크) | 30GB | ~8GB (1년 후) | 22GB 여유 |
-| **S3** (파일 저장소) | 5GB | ~1GB | 4GB 여유 |
-| **CloudWatch** (모니터링) | 10 지표, 5GB 로그 | 3~5 지표 | 여유 |
-| **SNS** (알림) | 이메일 1,000건/월 | ~30건/월 | 여유 |
+| 서비스                    | 무료 한도         | 우리가 쓸 양    | 남는 양   |
+| ------------------------- | ----------------- | --------------- | --------- |
+| **EC2** (서버)            | 매월 750시간      | ~720시간 (24/7) | 여유      |
+| **EBS** (디스크)          | 30GB              | ~8GB (1년 후)   | 22GB 여유 |
+| **S3** (파일 저장소)      | 5GB               | ~1GB            | 4GB 여유  |
+| **CloudWatch** (모니터링) | 10 지표, 5GB 로그 | 3~5 지표        | 여유      |
+| **SNS** (알림)            | 이메일 1,000건/월 | ~30건/월        | 여유      |
 
 ### 비용이 발생하는 실수를 피하려면
 
@@ -188,6 +188,7 @@
 아래 항목을 하나씩 설정합니다:
 
 #### Name (이름)
+
 ```
 investmate-server
 ```
@@ -232,15 +233,16 @@ t2.micro  —  Free tier eligible
 
 **인바운드 규칙 (Inbound rules):**
 
-| Type | Port | Source | 설명 |
-|------|------|--------|------|
-| SSH | 22 | My IP | 내 컴퓨터에서만 SSH 접속 허용 |
-| HTTP | 80 | 0.0.0.0/0 (Anywhere) | 웹 대시보드 접속 허용 |
+| Type | Port | Source               | 설명                          |
+| ---- | ---- | -------------------- | ----------------------------- |
+| SSH  | 22   | My IP                | 내 컴퓨터에서만 SSH 접속 허용 |
+| HTTP | 80   | 0.0.0.0/0 (Anywhere) | 웹 대시보드 접속 허용         |
 
 > **보안 팁**: SSH는 반드시 "My IP"로 제한하세요. "Anywhere"로 열면 전 세계에서 무차별 대입 공격을 받습니다.
 > IP가 바뀌면 AWS 콘솔에서 Security Group을 수정하면 됩니다.
 
 **규칙 추가 방법:**
+
 1. 기본으로 SSH 규칙이 1개 있습니다 → Source type을 `My IP`로 변경
 2. **Add security group rule** 클릭 → Type: `HTTP`, Source: `Anywhere-IPv4`
 
@@ -324,6 +326,7 @@ ssh -i ~/Downloads/investmate-key.pem ec2-user@3.35.xxx.xxx
 ```
 
 > **접속이 안 되면?**
+>
 > - `Connection timed out`: Security Group에서 SSH(22번 포트)가 내 IP로 열려 있는지 확인
 > - `Permission denied`: 키 파일(.pem)이 올바른지, 사용자 이름이 `ec2-user`인지 확인
 > - 키 파일 권한 에러: `chmod 400 investmate-key.pem` 실행
@@ -424,10 +427,12 @@ cd investmate
 ```
 
 > **Git 저장소가 private인 경우:**
+>
 > ```bash
 > # HTTPS + 개인 액세스 토큰 사용
 > git clone https://YOUR_TOKEN@github.com/YOUR_USERNAME/investmate.git
 > ```
+>
 > GitHub → Settings → Developer settings → Personal access tokens에서 토큰을 발급하세요.
 
 ### 5-2. Python 가상환경 생성 및 패키지 설치
@@ -577,6 +582,7 @@ investmate db init
 ```
 
 이 명령은 다음을 수행합니다:
+
 - SQLite 데이터베이스 파일 생성 (`data/investmate.db`)
 - 테이블 스키마 생성 (Dimension + Fact 테이블)
 - S&P 500 전 종목 (~500개) 시딩
@@ -687,6 +693,7 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/
 `200`이 출력되면 웹 서버가 정상 동작 중입니다.
 
 > **실패했다면?** 로그를 확인하세요:
+>
 > ```bash
 > sudo journalctl -u investmate-web -n 50 --no-pager
 > ```
@@ -699,6 +706,7 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/
 > 사용자가 포트 80(http://서버IP/)으로 접속하면, Nginx가 그 요청을 내부의 FastAPI(포트 8000)로 전달합니다.
 >
 > **왜 필요한가요?**
+>
 > - 포트 80은 브라우저에서 `:80`을 안 붙여도 됩니다 (편의성)
 > - Nginx가 정적 파일(CSS, JS)을 직접 처리해서 FastAPI 부하를 줄입니다
 > - 보안 헤더를 자동으로 추가합니다
@@ -786,6 +794,7 @@ http://3.35.xxx.xxx/
 Investmate 대시보드가 보이면 성공입니다.
 
 > **접속이 안 되면?**
+>
 > 1. Security Group에서 HTTP(80) 포트가 열려있는지 확인
 > 2. `sudo systemctl status nginx` 로 Nginx 상태 확인
 > 3. `sudo systemctl status investmate-web` 로 FastAPI 상태 확인
@@ -1255,13 +1264,13 @@ free -h
 
 ### 주간 점검 사항
 
-| 점검 항목 | 명령어 | 정상 상태 |
-|-----------|--------|----------|
-| 웹 서비스 | `sudo systemctl status investmate-web` | active (running) |
-| 배치 로그 | `ls -la logs/` | 평일마다 새 로그 파일 |
-| 디스크 | `df -h /` | 80% 미만 |
-| DB 크기 | `ls -lh data/investmate.db` | 매주 조금씩 증가 |
-| 리포트 | `ls reports/daily/ \| tail -5` | 평일마다 생성 |
+| 점검 항목 | 명령어                                 | 정상 상태             |
+| --------- | -------------------------------------- | --------------------- |
+| 웹 서비스 | `sudo systemctl status investmate-web` | active (running)      |
+| 배치 로그 | `ls -la logs/`                         | 평일마다 새 로그 파일 |
+| 디스크    | `df -h /`                              | 80% 미만              |
+| DB 크기   | `ls -lh data/investmate.db`            | 매주 조금씩 증가      |
+| 리포트    | `ls reports/daily/ \| tail -5`         | 평일마다 생성         |
 
 ---
 
@@ -1417,13 +1426,13 @@ DB: 로컬 파일 그대로 사용
 
 ### SSH 접속이 안 돼요
 
-| 증상 | 원인 | 해결 |
-|------|------|------|
+| 증상                   | 원인                                  | 해결                                                 |
+| ---------------------- | ------------------------------------- | ---------------------------------------------------- |
 | `Connection timed out` | Security Group에서 포트 22가 막혀있음 | AWS 콘솔 → EC2 → Security Groups → SSH(22) 규칙 확인 |
-| `Connection refused` | SSH 데몬이 실행되지 않음 | EC2 콘솔에서 인스턴스 재시작 |
-| `Permission denied` | 키 파일이 맞지 않음 | 올바른 .pem 파일 사용 확인 |
-| `bad permissions` | 키 파일 권한이 너무 개방적 | `chmod 400 investmate-key.pem` |
-| 내 IP가 바뀜 | Security Group이 이전 IP만 허용 | Security Group에서 SSH 규칙의 IP 업데이트 |
+| `Connection refused`   | SSH 데몬이 실행되지 않음              | EC2 콘솔에서 인스턴스 재시작                         |
+| `Permission denied`    | 키 파일이 맞지 않음                   | 올바른 .pem 파일 사용 확인                           |
+| `bad permissions`      | 키 파일 권한이 너무 개방적            | `chmod 400 investmate-key.pem`                       |
+| 내 IP가 바뀜           | Security Group이 이전 IP만 허용       | Security Group에서 SSH 규칙의 IP 업데이트            |
 
 ### 웹 대시보드가 안 보여요
 
@@ -1516,24 +1525,24 @@ investmate run  # 데이터 재수집
 
 ## 23. 용어 사전
 
-| 용어 | 설명 |
-|------|------|
-| **EC2** | Elastic Compute Cloud. AWS의 가상 서버. 원격으로 접속해서 사용하는 컴퓨터 |
-| **EBS** | Elastic Block Store. EC2에 연결된 디스크(하드드라이브). 서버를 꺼도 데이터 유지 |
-| **S3** | Simple Storage Service. 파일 저장소. 백업 용도로 사용 |
-| **AMI** | Amazon Machine Image. 운영체제(OS)가 설치된 서버 이미지. "기본 세팅된 컴퓨터" |
-| **Security Group** | 가상 방화벽. 어떤 포트를 누구에게 열어줄지 결정하는 규칙 |
-| **SSH** | Secure Shell. 암호화된 원격 접속 방법. 터미널로 서버를 조작 |
-| **Nginx** | 웹 서버/리버스 프록시. 외부 요청을 내부 앱으로 전달하는 중간 다리 역할 |
-| **systemd** | Linux 서비스 관리자. 프로그램을 자동 시작/종료/재시작 |
-| **cron** | Linux 작업 스케줄러. 정해진 시간에 자동으로 명령 실행 |
-| **Swap** | 디스크를 메모리처럼 사용하는 기술. RAM이 부족할 때 보조 역할 |
-| **Free Tier** | AWS 가입 후 12개월간 일부 서비스를 무료로 쓸 수 있는 프로그램 |
-| **t2.micro** | EC2 인스턴스 유형. 1 vCPU + 1GB RAM. Free Tier 대상 |
-| **gp3** | EBS 볼륨 유형. 범용 SSD. 성능과 비용의 균형이 좋음 |
-| **WAL 모드** | Write-Ahead Logging. SQLite의 동시 접근 최적화 모드 |
-| **리버스 프록시** | 외부 요청을 내부 서버로 전달하는 중간 서버. Nginx가 이 역할을 함 |
-| **Elastic IP** | EC2에 연결할 수 있는 고정 공인 IP. 재시작해도 IP가 바뀌지 않음 |
+| 용어               | 설명                                                                            |
+| ------------------ | ------------------------------------------------------------------------------- |
+| **EC2**            | Elastic Compute Cloud. AWS의 가상 서버. 원격으로 접속해서 사용하는 컴퓨터       |
+| **EBS**            | Elastic Block Store. EC2에 연결된 디스크(하드드라이브). 서버를 꺼도 데이터 유지 |
+| **S3**             | Simple Storage Service. 파일 저장소. 백업 용도로 사용                           |
+| **AMI**            | Amazon Machine Image. 운영체제(OS)가 설치된 서버 이미지. "기본 세팅된 컴퓨터"   |
+| **Security Group** | 가상 방화벽. 어떤 포트를 누구에게 열어줄지 결정하는 규칙                        |
+| **SSH**            | Secure Shell. 암호화된 원격 접속 방법. 터미널로 서버를 조작                     |
+| **Nginx**          | 웹 서버/리버스 프록시. 외부 요청을 내부 앱으로 전달하는 중간 다리 역할          |
+| **systemd**        | Linux 서비스 관리자. 프로그램을 자동 시작/종료/재시작                           |
+| **cron**           | Linux 작업 스케줄러. 정해진 시간에 자동으로 명령 실행                           |
+| **Swap**           | 디스크를 메모리처럼 사용하는 기술. RAM이 부족할 때 보조 역할                    |
+| **Free Tier**      | AWS 가입 후 12개월간 일부 서비스를 무료로 쓸 수 있는 프로그램                   |
+| **t2.micro**       | EC2 인스턴스 유형. 1 vCPU + 1GB RAM. Free Tier 대상                             |
+| **gp3**            | EBS 볼륨 유형. 범용 SSD. 성능과 비용의 균형이 좋음                              |
+| **WAL 모드**       | Write-Ahead Logging. SQLite의 동시 접근 최적화 모드                             |
+| **리버스 프록시**  | 외부 요청을 내부 서버로 전달하는 중간 서버. Nginx가 이 역할을 함                |
+| **Elastic IP**     | EC2에 연결할 수 있는 고정 공인 IP. 재시작해도 IP가 바뀌지 않음                  |
 
 ---
 
@@ -1570,13 +1579,13 @@ EC2를 재시작하면 공인 IP가 바뀝니다. 고정 IP가 필요하면:
 
 ### t2.micro 리소스 제약 참고
 
-| 항목 | 수치 | Investmate 사용량 | 여유 |
-|------|------|-------------------|------|
-| vCPU | 1개 | 배치 시 100%, 웹 시 5-10% | 배치는 하루 30분 |
-| RAM | 1GB | 웹 300MB + 배치 800MB (동시) | Swap 2GB 보완 |
-| CPU 크레딧 | 6크레딧/시간 (최대 144) | 배치 30분: ~30크레딧 | 하루 1회면 충분 |
-| 네트워크 | Low~Moderate | 배치: ~50MB, 웹: ~1MB/요청 | 여유 |
-| EBS IOPS | 3,000 (gp3 기본) | SQLite I/O: ~100 IOPS | 충분 |
+| 항목       | 수치                    | Investmate 사용량            | 여유             |
+| ---------- | ----------------------- | ---------------------------- | ---------------- |
+| vCPU       | 1개                     | 배치 시 100%, 웹 시 5-10%    | 배치는 하루 30분 |
+| RAM        | 1GB                     | 웹 300MB + 배치 800MB (동시) | Swap 2GB 보완    |
+| CPU 크레딧 | 6크레딧/시간 (최대 144) | 배치 30분: ~30크레딧         | 하루 1회면 충분  |
+| 네트워크   | Low~Moderate            | 배치: ~50MB, 웹: ~1MB/요청   | 여유             |
+| EBS IOPS   | 3,000 (gp3 기본)        | SQLite I/O: ~100 IOPS        | 충분             |
 
 > **CPU 크레딧이란?** t2 인스턴스는 기본 CPU 사용률(10%)을 초과하면 "크레딧"을 소모합니다.
 > 크레딧은 사용하지 않는 동안 자동 충전됩니다. 하루 1회 30분 배치면 크레딧이 충분합니다.
