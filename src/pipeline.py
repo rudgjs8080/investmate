@@ -101,12 +101,35 @@ class DailyPipeline:
                 self._log_step("step0_performance", "failed", started, message=str(e))
                 console.print(f"  [red]실패: {e}[/red]")
 
+        # STEP 0.5: AI 예측 복기 (20거래일 전 추천 복기 + 교훈 추출)
+        if step is None and not self._interrupted:
+            started = datetime.now()
+            console.print("\n[cyan]STEP 0.5[/cyan] AI 예측 복기")
+            try:
+                from src.ai.retrospective import run_retrospective
+
+                with get_session(self.engine) as session:
+                    retro_count = run_retrospective(session, self.target_date)
+                self._log_step(
+                    "step0_5_retrospective", "success", started,
+                    records_count=retro_count,
+                )
+                console.print(f"  [green]완료[/green] ({retro_count}건)")
+            except Exception as e:
+                logger.error("STEP 0.5 실패: %s", e, exc_info=True)
+                self._log_step(
+                    "step0_5_retrospective", "failed", started, message=str(e),
+                )
+                console.print(f"  [red]실패: {e}[/red]")
+
         steps = [
             (1, "step1_collect", self.step1_collect),
             (2, "step2_analyze", self.step2_analyze),
             (3, "step3_external", self.step3_external),
             (4, "step4_screen", self.step4_screen),
             (4.5, "step4_5_ai", self.step4_5_ai_analysis),
+            (4.6, "step4_6_sizing", self.step4_6_position_sizing),
+            (4.7, "step4_7_factors", self.step4_7_factor_returns),
             (5, "step5_report", self.step5_report),
             (6, "step6_notify", self.step6_notify),
         ]
@@ -578,12 +601,14 @@ class DailyPipeline:
             except Exception as e:
                 logger.warning("RS 계산 실패: %s", e)
 
+            _settings = get_settings()
             recommendations = screen_and_rank(
                 session, self.target_date,
                 top_n=self.top_n,
                 market_score=market_score or 5,
                 sector_momentum=sector_mom,
                 rs_ranks=rs_ranks,
+                scoring_mode=_settings.factor_scoring_mode,
             )
 
             if not recommendations:
@@ -721,6 +746,29 @@ class DailyPipeline:
         except Exception as e:
             logger.debug("AI 피드백 수집 스킵: %s", e)
 
+        # 교훈 관리: 만료 + 효과성 업데이트 + 조건별 캘리브레이션 갱신
+        try:
+            from src.ai.lesson_store import expire_old_lessons, update_lesson_effectiveness
+            from src.ai.calibrator import build_condition_calibration
+            from src.db.helpers import date_to_id as _d2i
+
+            with get_session(self.engine) as session:
+                expired = expire_old_lessons(session, self.target_date)
+                eff_updated = update_lesson_effectiveness(session, self.target_date)
+                cutoff_id = _d2i(self.target_date - timedelta(days=35))
+                cal_cells = build_condition_calibration(session, cutoff_id)
+                parts: list[str] = []
+                if expired:
+                    parts.append(f"만료 {expired}건")
+                if eff_updated:
+                    parts.append(f"효과성 {eff_updated}건")
+                if cal_cells:
+                    parts.append(f"캘리브레이션 {len(cal_cells)}셀")
+                if parts:
+                    console.print(f"  [dim]교훈 관리: {', '.join(parts)}[/dim]")
+        except Exception as e:
+            logger.debug("교훈 관리 스킵: %s", e)
+
         with get_session(self.engine) as session:
             report = assemble_enriched_report(session, self.target_date, self.run_date_id)
 
@@ -818,78 +866,138 @@ class DailyPipeline:
 
         settings = get_settings()
 
-        # 캐시 확인
-        from src.ai.cache import get_cached_response, save_cached_response
-        cached = get_cached_response(self.target_date, prompt)
-        ai_backend = "cached"
-        if cached:
-            console.print("  [dim]AI 캐시 히트 -- 이전 분석 결과 재사용[/dim]")
-            response: dict | str | None = cached
+        # ── 토론 모드 분기 ──
+        if settings.ai_mode == "debate":
+            try:
+                from src.ai.debate import run_debate, save_debate_rounds
+
+                console.print("  [dim]멀티 에이전트 토론 모드[/dim]")
+
+                # 제약 규칙 생성
+                _debate_constraints = None
+                try:
+                    from src.ai.feedback import generate_constraint_rules
+                    from src.analysis.regime import detect_regime
+
+                    with get_session(self.engine) as _dsess:
+                        _dregime = detect_regime(_dsess)
+                        _dmacro = MacroRepository.get_latest(_dsess)
+                        _dvix = float(_dmacro.vix) if _dmacro and _dmacro.vix else None
+                        _debate_constraints = generate_constraint_rules(
+                            _dsess, vix=_dvix, regime=_dregime.regime,
+                        )
+                except Exception as e:
+                    logger.debug("토론 제약 생성 실패: %s", e)
+
+                debate_result = run_debate(
+                    stock_data_prompt=prompt,
+                    constraints=_debate_constraints,
+                    model=settings.ai_model_analysis,
+                    timeout=settings.ai_timeout,
+                )
+                parsed = debate_result.final_parsed
+                tool_deep_dive = debate_result.deep_dive
+
+                # 토론 라운드 DB 저장
+                with get_session(self.engine) as session:
+                    save_debate_rounds(session, self.run_date_id, debate_result)
+
+                console.print(
+                    f"  [dim]토론 완료: 합의 {debate_result.consensus_strength}, "
+                    f"{len(parsed)}종목 판정[/dim]"
+                )
+
+                if not parsed:
+                    console.print("  [yellow]토론 결과 파싱 실패 — legacy 모드 폴백[/yellow]")
+                    _skip_legacy = False
+                else:
+                    # 토론 성공 — calibration/validation으로 점프
+                    # (Phase 5~7 코드와 동일한 parsed 처리)
+                    save_analysis(json.dumps(
+                        {"debate_mode": True, "consensus": debate_result.consensus_strength,
+                         "parsed_count": len(parsed)},
+                        ensure_ascii=False, indent=2,
+                    ), self.target_date)
+                    # 아래 legacy 분석 건너뛰고 바로 calibration으로
+                    ai_backend = "debate"
+                    # goto calibration phase (skip legacy block)
+                    # Python doesn't have goto, so we use a flag
+                    _skip_legacy = True
+            except Exception as e:
+                logger.warning("토론 모드 실패, legacy 폴백: %s", e)
+                console.print(f"  [yellow]토론 실패: {e} — legacy 폴백[/yellow]")
+                _skip_legacy = False
         else:
-            # Round 1: Tool Use -> SDK -> CLI 순으로 시도
-            console.print("  [dim]AI Round 1: 스크리닝 분석 중...[/dim]")
-            response, ai_backend = run_analysis(
-                prompt,
-                timeout=settings.ai_timeout,
-                model=settings.ai_model_analysis,
-            )
-        if response is None:
-            console.print("  [yellow]AI Round 1 실패, 재시도 중...[/yellow]")
-            # 재시도: 간소화된 프롬프트 (상위 5개만)
-            response, ai_backend = run_analysis(prompt[:len(prompt) // 2], timeout=180)
+            _skip_legacy = False
+
+        if not _skip_legacy:
+            # ── 레거시 모드 (기존 단일 호출) ──
+            from src.ai.cache import get_cached_response, save_cached_response
+            cached = get_cached_response(self.target_date, prompt)
+            ai_backend = "cached"
+            if cached:
+                console.print("  [dim]AI 캐시 히트 -- 이전 분석 결과 재사용[/dim]")
+                response: dict | str | None = cached
+            else:
+                # Round 1: Tool Use -> SDK -> CLI 순으로 시도
+                console.print("  [dim]AI Round 1: 스크리닝 분석 중...[/dim]")
+                response, ai_backend = run_analysis(
+                    prompt,
+                    timeout=settings.ai_timeout,
+                    model=settings.ai_model_analysis,
+                )
             if response is None:
-                console.print("  [red]AI 분석 실패 -- 프롬프트만 저장됨[/red]")
-                return 0
+                console.print("  [yellow]AI Round 1 실패, 재시도 중...[/yellow]")
+                response, ai_backend = run_analysis(prompt[:len(prompt) // 2], timeout=180)
+                if response is None:
+                    console.print("  [red]AI 분석 실패 -- 프롬프트만 저장됨[/red]")
+                    return 0
 
-        logger.info("AI 백엔드: %s", ai_backend)
+            logger.info("AI 백엔드: %s", ai_backend)
 
-        # Tool Use dict인 경우 파싱 불필요
-        if isinstance(response, dict):
-            console.print("  [dim]Tool Use 구조화 출력 수신[/dim]")
-            # dict -> parse_ai_response가 처리하는 동일 형태로 변환
-            from src.ai.claude_analyzer import _try_parse_json
-            parsed = _try_parse_json(json.dumps(response))
-            if parsed is None:
-                # fallback: 직접 변환
-                parsed = []
-                analysis_map = {
-                    item["ticker"]: item
-                    for item in response.get("analysis", [])
-                    if "ticker" in item
-                }
-                for ticker in response.get("approved", []):
-                    entry: dict = {"ticker": ticker, "ai_approved": True}
-                    item = analysis_map.get(ticker, {})
-                    entry["ai_reason"] = item.get("reason", "")
-                    if item.get("target_price"):
-                        entry["ai_target_price"] = float(item["target_price"])
-                    if item.get("stop_loss"):
-                        entry["ai_stop_loss"] = float(item["stop_loss"])
-                    if item.get("confidence"):
-                        entry["ai_confidence"] = max(1, min(10, int(item["confidence"])))
-                    if item.get("risk_level"):
-                        entry["ai_risk_level"] = str(item["risk_level"]).upper()
-                    if item.get("entry_strategy"):
-                        entry["entry_strategy"] = str(item["entry_strategy"])
-                    if item.get("exit_strategy"):
-                        entry["exit_strategy"] = str(item["exit_strategy"])
-                    parsed.append(entry)
-                for ticker in response.get("excluded", []):
-                    entry = {"ticker": ticker, "ai_approved": False}
-                    item = analysis_map.get(ticker, {})
-                    entry["ai_reason"] = item.get("reason", "")
-                    parsed.append(entry)
-            # deep_dive가 있으면 Round 2 스킵을 위해 저장
-            tool_deep_dive = response.get("deep_dive")
-            save_analysis(json.dumps(response, ensure_ascii=False, indent=2), self.target_date)
-        else:
-            tool_deep_dive = None
-            save_analysis(response, self.target_date)
-            if not cached:
-                save_cached_response(self.target_date, prompt, response)
-            console.print("  [dim]AI 응답 수신 완료, 파싱 중...[/dim]")
-            # 텍스트 응답 — 기존 파싱
-            parsed = parse_ai_response(response)
+            # Tool Use dict인 경우 파싱
+            if isinstance(response, dict):
+                console.print("  [dim]Tool Use 구조화 출력 수신[/dim]")
+                from src.ai.claude_analyzer import _try_parse_json
+                parsed = _try_parse_json(json.dumps(response))
+                if parsed is None:
+                    parsed = []
+                    analysis_map = {
+                        item["ticker"]: item
+                        for item in response.get("analysis", [])
+                        if "ticker" in item
+                    }
+                    for ticker in response.get("approved", []):
+                        entry: dict = {"ticker": ticker, "ai_approved": True}
+                        item = analysis_map.get(ticker, {})
+                        entry["ai_reason"] = item.get("reason", "")
+                        if item.get("target_price"):
+                            entry["ai_target_price"] = float(item["target_price"])
+                        if item.get("stop_loss"):
+                            entry["ai_stop_loss"] = float(item["stop_loss"])
+                        if item.get("confidence"):
+                            entry["ai_confidence"] = max(1, min(10, int(item["confidence"])))
+                        if item.get("risk_level"):
+                            entry["ai_risk_level"] = str(item["risk_level"]).upper()
+                        if item.get("entry_strategy"):
+                            entry["entry_strategy"] = str(item["entry_strategy"])
+                        if item.get("exit_strategy"):
+                            entry["exit_strategy"] = str(item["exit_strategy"])
+                        parsed.append(entry)
+                    for ticker in response.get("excluded", []):
+                        entry = {"ticker": ticker, "ai_approved": False}
+                        item = analysis_map.get(ticker, {})
+                        entry["ai_reason"] = item.get("reason", "")
+                        parsed.append(entry)
+                tool_deep_dive = response.get("deep_dive")
+                save_analysis(json.dumps(response, ensure_ascii=False, indent=2), self.target_date)
+            else:
+                tool_deep_dive = None
+                save_analysis(response, self.target_date)
+                if not cached:
+                    save_cached_response(self.target_date, prompt, response)
+                console.print("  [dim]AI 응답 수신 완료, 파싱 중...[/dim]")
+                parsed = parse_ai_response(response)
 
         # AI 캘리브레이션 (과거 편향 기반 보정)
         try:
@@ -1069,6 +1177,347 @@ class DailyPipeline:
 
         console.print(f"  AI 분석 완료: {updated}개 종목 업데이트")
         return updated
+
+    def step4_6_position_sizing(self) -> int:
+        """포지션 사이징 + 리스크 제약 + 손절가 산출."""
+        settings = get_settings()
+        if not settings.sizing_enabled:
+            console.print("  [dim]포지션 사이징 비활성화됨[/dim]")
+            return 0
+
+        from src.db.models import FactDailyRecommendation
+        from src.portfolio.drawdown_manager import (
+            DrawdownConfig,
+            apply_drawdown_reduction,
+            check_portfolio_drawdown,
+            compute_stop_loss,
+        )
+        from src.portfolio.position_sizer import PositionSizingInput, size_positions
+        from src.portfolio.risk_constraints import (
+            RiskConstraints,
+            check_and_adjust,
+        )
+
+        with get_session(self.engine) as session:
+            recs = RecommendationRepository.get_by_date(session, self.run_date_id)
+            if not recs:
+                console.print("  [dim]추천 종목 없음, 사이징 스킵[/dim]")
+                return 0
+
+            # AI 승인 종목만 (ai_approved=True 또는 None)
+            approved = [r for r in recs if r.ai_approved is not False]
+            if not approved:
+                console.print("  [dim]AI 승인 종목 없음[/dim]")
+                return 0
+
+            # 종목 정보 배치 로드 (N+1 방지)
+            from sqlalchemy import select as sel
+            from src.db.models import DimStock
+
+            stock_ids = [rec.stock_id for rec in approved]
+            stocks = session.execute(
+                sel(DimStock).where(DimStock.stock_id.in_(stock_ids))
+            ).scalars().all()
+            stock_by_id = {s.stock_id: s for s in stocks}
+
+            ticker_map: dict[int, str] = {}
+            sector_map: dict[str, str | None] = {}
+            for sid, stock in stock_by_id.items():
+                ticker_map[sid] = stock.ticker
+                sector_name = None
+                if stock.sector:
+                    sector_name = stock.sector.sector_name
+                sector_map[stock.ticker] = sector_name
+
+            # 60일 가격 히스토리 로드
+            import numpy as np
+            import pandas as pd
+
+            price_data: dict[str, pd.Series] = {}
+            ohlc_data: dict[str, dict] = {}  # ticker -> {highs, lows, closes}
+            volume_data: dict[str, float] = {}
+
+            lookback_start = self.target_date - timedelta(days=120)
+            for rec in approved:
+                ticker = ticker_map.get(rec.stock_id)
+                if not ticker:
+                    continue
+                prices = DailyPriceRepository.get_prices(
+                    session, rec.stock_id,
+                    start_date=lookback_start, end_date=self.target_date,
+                )
+                if not prices or len(prices) < 10:
+                    continue
+                closes = [float(p.close) for p in prices]
+                price_data[ticker] = pd.Series(closes)
+                ohlc_data[ticker] = {
+                    "highs": [float(p.high) for p in prices],
+                    "lows": [float(p.low) for p in prices],
+                    "closes": closes,
+                }
+                if prices:
+                    vol = float(prices[-1].volume) if prices[-1].volume else 0.0
+                    volume_data[ticker] = vol
+
+            if not price_data:
+                console.print("  [dim]가격 데이터 부족, 사이징 스킵[/dim]")
+                return 0
+
+            # 수익률 행렬 + 공분산
+            from src.portfolio.optimizer import _build_return_matrix
+
+            returns_df = _build_return_matrix(price_data)
+            tickers_order = list(returns_df.columns)
+            cov_matrix = None
+            if len(returns_df) >= 10 and len(tickers_order) >= 2:
+                try:
+                    from sklearn.covariance import LedoitWolf
+                    lw = LedoitWolf()
+                    cov_matrix = lw.fit(returns_df.values).covariance_
+                except Exception:
+                    cov_matrix = returns_df.cov().values
+
+            # 연환산 변동성 계산
+            annual_vols: dict[str, float] = {}
+            for ticker in tickers_order:
+                if ticker in returns_df.columns:
+                    daily_vol = returns_df[ticker].std()
+                    annual_vols[ticker] = float(daily_vol * np.sqrt(252))
+
+            # 사이징 입력 구성
+            inputs = []
+            rec_by_ticker: dict[str, FactDailyRecommendation] = {}
+            for rec in approved:
+                ticker = ticker_map.get(rec.stock_id)
+                if not ticker or ticker not in tickers_order:
+                    continue
+                rec_by_ticker[ticker] = rec
+                inputs.append(PositionSizingInput(
+                    ticker=ticker,
+                    stock_id=rec.stock_id,
+                    volatility=annual_vols.get(ticker, 0.20),
+                    ai_confidence=rec.ai_confidence,
+                    sector=sector_map.get(ticker),
+                    price=float(rec.price_at_recommendation or 0),
+                    daily_volume=volume_data.get(ticker),
+                ))
+
+            if not inputs:
+                return 0
+
+            # 포지션 사이징
+            target_vol = settings.target_volatility_pct / 100.0
+            sizing_result = size_positions(
+                inputs=inputs,
+                cov_matrix=cov_matrix,
+                strategy=settings.sizing_strategy,
+                target_vol=target_vol,
+                risk_free_rate=settings.risk_free_rate_pct / 100.0,
+            )
+
+            # 리스크 제약 적용
+            risk_constraints = RiskConstraints(
+                max_single_stock_pct=settings.max_single_stock_pct,
+                max_sector_pct=settings.max_sector_weight_pct,
+                daily_var_limit=settings.daily_var_limit_pct / 100.0,
+            )
+            constraint_result = check_and_adjust(
+                weights=sizing_result.weights,
+                sector_map=sector_map,
+                cov_matrix=cov_matrix,
+                tickers_order=tickers_order,
+                constraints=risk_constraints,
+            )
+
+            final_weights = constraint_result.adjusted_weights
+
+            # 드로다운 확인 + 축소
+            dd_config = DrawdownConfig(
+                portfolio_trailing_stop_pct=settings.portfolio_trailing_stop_pct / 100.0,
+                atr_stop_multiplier=settings.atr_stop_multiplier,
+            )
+            dd_state = check_portfolio_drawdown(session, self.run_date_id, dd_config)
+            if dd_state.is_triggered:
+                final_weights = apply_drawdown_reduction(final_weights, dd_state)
+                console.print(
+                    f"  [yellow]드로다운 트리거: {dd_state.drawdown_pct:.1%} "
+                    f"→ 노출도 {dd_state.exposure_multiplier:.0%}[/yellow]"
+                )
+
+            # 턴오버 관리
+            from src.portfolio.turnover import (
+                TurnoverConfig,
+                apply_hold_rules,
+                calculate_turnover,
+                get_previous_weights,
+            )
+
+            turnover_config = TurnoverConfig(
+                annualized_warn_threshold=settings.turnover_warn_threshold,
+                hold_score_floor_pct=settings.turnover_hold_floor_pct,
+            )
+            old_weights = get_previous_weights(session, self.run_date_id)
+            turnover_stats = None
+
+            if old_weights:
+                scores_map = {
+                    ticker_map.get(r.stock_id, ""): float(r.total_score)
+                    for r in approved if r.stock_id in ticker_map
+                }
+                stop_map: dict[str, bool] = {}
+                final_weights = apply_hold_rules(
+                    final_weights, old_weights, scores_map, stop_map,
+                    turnover_config,
+                )
+                turnover_stats = calculate_turnover(
+                    final_weights, old_weights, turnover_config,
+                )
+                if turnover_stats.is_excessive:
+                    console.print(
+                        f"  [yellow]턴오버 경고: 연환산 "
+                        f"{turnover_stats.annualized_turnover:.0%}[/yellow]"
+                    )
+
+            # 실행 비용 계산
+            cost_result = None
+            if settings.execution_cost_enabled:
+                from src.portfolio.execution_cost import (
+                    ExecutionCostConfig,
+                    estimate_portfolio_cost,
+                )
+
+                # ADTV (20일 평균 거래량) 계산
+                adtv_map: dict[str, float] = {}
+                for ticker, ohlc in ohlc_data.items():
+                    volumes = []
+                    prices_list = DailyPriceRepository.get_prices(
+                        session,
+                        next(
+                            (r.stock_id for r in approved
+                             if ticker_map.get(r.stock_id) == ticker),
+                            0,
+                        ),
+                        start_date=self.target_date - timedelta(days=40),
+                        end_date=self.target_date,
+                    )
+                    for p in prices_list[-20:]:
+                        if p.volume:
+                            volumes.append(float(p.volume))
+                    if volumes:
+                        adtv_map[ticker] = sum(volumes) / len(volumes)
+
+                exec_config = ExecutionCostConfig(
+                    enabled=True,
+                    spread_bps=settings.spread_bps,
+                    impact_coefficient=settings.impact_coefficient,
+                    max_participation_rate=settings.max_participation_rate,
+                )
+                price_map_for_cost = {
+                    ticker_map.get(r.stock_id, ""): float(r.price_at_recommendation or 0)
+                    for r in approved if r.stock_id in ticker_map
+                }
+                cost_result = estimate_portfolio_cost(
+                    weights=final_weights,
+                    price_map=price_map_for_cost,
+                    volatility_map={t: v / np.sqrt(252) for t, v in annual_vols.items()},
+                    adtv_map=adtv_map,
+                    config=exec_config,
+                )
+                if cost_result.capacity_limited_tickers:
+                    console.print(
+                        f"  [yellow]용량 초과: "
+                        f"{', '.join(cost_result.capacity_limited_tickers)}[/yellow]"
+                    )
+
+            # 손절가 계산 + DB 업데이트
+            updated = 0
+            cost_map = {}
+            if cost_result:
+                cost_map = {cb.ticker: cb for cb in cost_result.breakdowns}
+
+            for rec in approved:
+                ticker = ticker_map.get(rec.stock_id)
+                if not ticker:
+                    continue
+
+                weight = final_weights.get(ticker, 0.0)
+                rec.position_weight = round(weight, 6)
+                rec.sizing_strategy = settings.sizing_strategy
+
+                # 실행 비용 기록
+                cb = cost_map.get(ticker)
+                if cb:
+                    rec.spread_cost_bps = cb.spread_bps
+                    rec.impact_cost_bps = cb.impact_bps
+                    rec.total_cost_bps = cb.total_bps
+
+                # 턴오버 기록
+                if turnover_stats:
+                    rec.daily_turnover = turnover_stats.daily_turnover
+
+                # ATR 손절가
+                ohlc = ohlc_data.get(ticker)
+                if ohlc and rec.price_at_recommendation:
+                    sl = compute_stop_loss(
+                        ticker=ticker,
+                        entry_price=float(rec.price_at_recommendation),
+                        ai_stop_loss=float(rec.ai_stop_loss) if rec.ai_stop_loss else None,
+                        highs=ohlc["highs"],
+                        lows=ohlc["lows"],
+                        closes=ohlc["closes"],
+                        config=dd_config,
+                    )
+                    rec.trailing_stop = sl.stop_price
+                    rec.atr_stop = sl.stop_price if sl.stop_type == "atr" else None
+
+                updated += 1
+
+            # AI 거부 종목은 비중 0
+            for rec in recs:
+                if rec.ai_approved is False:
+                    rec.position_weight = 0.0
+                    rec.sizing_strategy = settings.sizing_strategy
+
+            session.flush()
+
+            # 경고 출력
+            for v in constraint_result.violations:
+                console.print(f"  [yellow]제약 위반: {v.description}[/yellow]")
+            for w in constraint_result.warnings:
+                console.print(f"  [dim]경고: {w.description}[/dim]")
+
+            total_exposure = sum(final_weights.values())
+            cash = max(0.0, 1.0 - total_exposure)
+            cost_info = ""
+            if cost_result:
+                cost_info = f", 비용: {cost_result.portfolio_avg_cost_bps:.1f}bps"
+                if cost_result.max_aum_estimate:
+                    cost_info += f", 용량: ${cost_result.max_aum_estimate:,.0f}"
+            console.print(
+                f"  총 노출도: {total_exposure:.1%}, 현금: {cash:.1%}, "
+                f"전략: {settings.sizing_strategy}{cost_info}"
+            )
+
+        return updated
+
+    def step4_7_factor_returns(self) -> int:
+        """팩터 수익률 계산 + 저장."""
+        try:
+            from src.analysis.factor_returns import (
+                compute_daily_factor_returns,
+                store_factor_returns,
+            )
+
+            with get_session(self.engine) as session:
+                spreads = compute_daily_factor_returns(session, self.target_date)
+                if not spreads:
+                    console.print("  [dim]팩터 수익률 데이터 부족[/dim]")
+                    return 0
+                count = store_factor_returns(session, spreads)
+            return count
+        except Exception as e:
+            logger.warning("팩터 수익률 계산 실패: %s", e)
+            return 0
 
     def step6_notify(self) -> int:
         """알림 발송."""

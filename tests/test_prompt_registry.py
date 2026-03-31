@@ -28,11 +28,12 @@ class TestGetPromptConfig:
 class TestListVersions:
     def test_list_versions_all_present(self):
         versions = list_versions()
-        assert len(versions) == 3
+        assert len(versions) == 4
         version_names = [v["version"] for v in versions]
         assert "v1_base" in version_names
         assert "v2_cot" in version_names
         assert "v3_debate" in version_names
+        assert "v4_multi_agent" in version_names
         for v in versions:
             assert "description" in v
             assert "chain_of_thought" in v

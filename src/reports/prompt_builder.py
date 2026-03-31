@@ -70,6 +70,34 @@ def _collect_feedback_safe(session: Session) -> object | None:
         return None
 
 
+def _collect_lessons_safe(session: Session, run_date: date) -> list | None:
+    """AI 자기학습 교훈을 안전하게 수집한다."""
+    try:
+        from src.ai.lesson_store import get_active_lessons
+        return get_active_lessons(session, run_date, top_n=10)
+    except Exception as e:
+        logger.debug("교훈 수집 실패 (초기에는 정상): %s", e)
+        return None
+
+
+def _collect_condition_cal_safe(
+    session: Session, run_date_id: int,
+) -> str | None:
+    """조건별 캘리브레이션 테이블을 안전하게 수집한다."""
+    try:
+        from datetime import timedelta
+
+        from src.ai.calibrator import format_calibration_for_prompt
+        from src.db.helpers import id_to_date
+
+        run_date = id_to_date(run_date_id)
+        cutoff_id = run_date_id  # 현재까지의 데이터 사용
+        return format_calibration_for_prompt(session, cutoff_id)
+    except Exception as e:
+        logger.debug("조건별 캘리브레이션 수집 실패: %s", e)
+        return None
+
+
 def build_prompt(
     session: Session, run_date_id: int, run_date: date,
 ) -> str:
@@ -87,12 +115,15 @@ def build_prompt(
     fomc_info: tuple | None = None
     ai_feedback: object | None = None
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+    lessons = None
+    condition_cal = None
+
+    # I/O 바운드 작업 병렬 (외부 API, 세션 미사용)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         fut_enrich = executor.submit(
             _collect_enriched_safe, tickers, report.recommendations,
         )
         fut_events = executor.submit(_collect_events_safe, tickers, run_date)
-        fut_feedback = executor.submit(_collect_feedback_safe, session)
 
         try:
             enriched_data, sector_per_avgs = fut_enrich.result(timeout=30)
@@ -104,10 +135,10 @@ def build_prompt(
         except Exception:
             pass
 
-        try:
-            ai_feedback = fut_feedback.result(timeout=10)
-        except Exception:
-            pass
+    # DB 세션 사용 작업은 순차 실행 (SQLite 스레드 안전)
+    ai_feedback = _collect_feedback_safe(session)
+    lessons = _collect_lessons_safe(session, run_date)
+    condition_cal = _collect_condition_cal_safe(session, run_date_id)
 
     # 제약 규칙 생성
     constraints = None
@@ -126,9 +157,21 @@ def build_prompt(
     except Exception as e:
         logger.warning("제약 규칙 생성 실패: %s", e)
 
+    # 교훈 적용 카운트 증분
+    if lessons:
+        try:
+            from src.ai.lesson_store import increment_applied_count
+
+            increment_applied_count(
+                session, [l.lesson_id for l in lessons],
+            )
+        except Exception:
+            pass
+
     return _render_prompt(
         report, enriched_data, sector_per_avgs, ai_feedback,
         events_data, fomc_info, constraints=constraints,
+        lessons=lessons, condition_calibration=condition_cal,
     )
 
 
@@ -164,6 +207,8 @@ def _render_prompt(
     events_data: dict | None = None,
     fomc_info: tuple | None = None,
     constraints: object | None = None,
+    lessons: list | None = None,
+    condition_calibration: str | None = None,
 ) -> str:
     """EnrichedDailyReport + 보강 데이터 + 제약 규칙 → 프롬프트 텍스트."""
     enriched_data = enriched_data or {}
@@ -288,6 +333,33 @@ def _render_prompt(
     else:
         _w("현재 추가 피드백 규칙 없음.")
     _w("</feedback_rules>")
+    _w("")
+
+    # AI 자기학습 교훈 (soft rules)
+    _w("<lessons_learned>")
+    _w("아래는 과거 예측 복기에서 AI가 스스로 추출한 교훈이다.")
+    _w("이 교훈은 참고 지침이며, hard_rules와 충돌할 경우 hard_rules가 우선한다.")
+    _w("")
+    if lessons:
+        for i, lesson in enumerate(lessons, 1):
+            eff = ""
+            if lesson.effectiveness_score is not None:
+                eff = f" (적용 후 승률 변화: {lesson.effectiveness_score:+.1f}%p)"
+            _w(f"{i}. [{lesson.category}] {lesson.lesson_text}{eff}")
+    else:
+        _w("아직 축적된 교훈이 없습니다.")
+    _w("</lessons_learned>")
+    _w("")
+
+    # 조건별 캘리브레이션 테이블
+    _w("<condition_calibration>")
+    if condition_calibration:
+        _w("조건별 실제 승률 (과거 데이터 기반):")
+        _w(condition_calibration)
+        _w("분석 시 해당 종목의 조건(체제/섹터/신뢰도)에 맞는 셀의 승률을 참고하여 신뢰도를 조정하라.")
+    else:
+        _w("조건별 캘리브레이션 데이터 부족.")
+    _w("</condition_calibration>")
     _w("")
 
     # 과거 성과 수치 (참고)

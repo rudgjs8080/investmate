@@ -18,9 +18,15 @@ PROMPT_VERSIONS: dict[str, dict] = {
         "chain_of_thought": True,
         "bull_bear_debate": True,
     },
+    "v4_multi_agent": {
+        "description": "멀티 에이전트 토론 (Bull/Bear/Synthesizer 3라운드)",
+        "chain_of_thought": True,
+        "bull_bear_debate": True,
+        "multi_agent": True,
+    },
 }
 
-DEFAULT_VERSION = "v3_debate"
+DEFAULT_VERSION = "v4_multi_agent"
 
 
 def get_prompt_config(version: str | None = None) -> dict:

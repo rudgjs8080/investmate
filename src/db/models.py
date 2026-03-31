@@ -348,6 +348,16 @@ class FactDailyRecommendation(TimestampMixin, Base):
     ai_risk_level: Mapped[str | None] = mapped_column(String(10), nullable=True)
     ai_entry_strategy: Mapped[str | None] = mapped_column(Text, nullable=True)
     ai_exit_strategy: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 포지션 사이징 (Step 4.6)
+    position_weight: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    trailing_stop: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    atr_stop: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    sizing_strategy: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # 실행 비용 분해 (영역 3)
+    spread_cost_bps: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    impact_cost_bps: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    total_cost_bps: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    daily_turnover: Mapped[float | None] = mapped_column(Numeric, nullable=True)
 
 
 class FactAIFeedback(TimestampMixin, Base):
@@ -375,6 +385,111 @@ class FactAIFeedback(TimestampMixin, Base):
     target_hit: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     stop_hit: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     target_error_pct: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+
+
+class FactAILesson(TimestampMixin, Base):
+    """AI 자기학습 교훈 누적 저장소."""
+
+    __tablename__ = "fact_ai_lessons"
+
+    lesson_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_date_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("dim_date.date_id"), nullable=False
+    )
+    lesson_text: Mapped[str] = mapped_column(Text, nullable=False)
+    category: Mapped[str] = mapped_column(String(30), nullable=False)
+    source_recommendation_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("fact_daily_recommendations.recommendation_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    source_ticker: Mapped[str] = mapped_column(String(10), nullable=False)
+    source_sector: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    source_regime: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    source_vix_level: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    source_return_20d: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    times_applied: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    effectiveness_score: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    expires_at: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+
+class FactAIRetrospective(TimestampMixin, Base):
+    """AI 예측 복기 기록."""
+
+    __tablename__ = "fact_ai_retrospectives"
+
+    retrospective_id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True
+    )
+    run_date_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("dim_date.date_id"), nullable=False
+    )
+    recommendation_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("fact_daily_recommendations.recommendation_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    ticker: Mapped[str] = mapped_column(String(10), nullable=False)
+    original_ai_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    actual_return_20d: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    max_gain_pct: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    max_loss_pct: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    price_path_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    retrospective_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    lesson_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("fact_ai_lessons.lesson_id"), nullable=True
+    )
+
+
+class FactCalibrationCell(TimestampMixin, Base):
+    """조건별 캘리브레이션 셀 (regime x sector x confidence x event)."""
+
+    __tablename__ = "fact_calibration_cells"
+    __table_args__ = (
+        UniqueConstraint(
+            "regime", "sector", "confidence_range", "has_event",
+            name="uq_calibration_cell",
+        ),
+    )
+
+    cell_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    regime: Mapped[str] = mapped_column(String(20), nullable=False)
+    sector: Mapped[str] = mapped_column(String(100), nullable=False)
+    confidence_range: Mapped[str] = mapped_column(String(10), nullable=False)
+    has_event: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    sample_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    win_rate: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    avg_return: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    last_updated_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("dim_date.date_id"), nullable=True
+    )
+
+
+class FactAIDebate(TimestampMixin, Base):
+    """멀티 에이전트 토론 라운드별 기록."""
+
+    __tablename__ = "fact_ai_debate"
+    __table_args__ = (
+        Index("idx_debate_rec", "recommendation_id"),
+        Index("idx_debate_date", "run_date_id"),
+    )
+
+    debate_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_date_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("dim_date.date_id"), nullable=False
+    )
+    recommendation_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("fact_daily_recommendations.recommendation_id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    agent_role: Mapped[str] = mapped_column(String(12), nullable=False)
+    round_num: Mapped[int] = mapped_column(Integer, nullable=False)
+    analysis_text: Mapped[str] = mapped_column(Text, nullable=False)
+    confidence: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    key_arguments: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    consensus_strength: Mapped[str | None] = mapped_column(String(10), nullable=True)
 
 
 class FactNews(TimestampMixin, Base):
@@ -518,6 +633,27 @@ class FactEarningsSurprise(TimestampMixin, Base):
     revenue_estimate: Mapped[float | None] = mapped_column(Numeric, nullable=True)
     revenue_actual: Mapped[float | None] = mapped_column(Numeric, nullable=True)
     revenue_surprise_pct: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+
+
+class FactFactorReturn(TimestampMixin, Base):
+    """팩터 수익률 팩트 테이블 — 일별 롱숏 스프레드."""
+
+    __tablename__ = "fact_factor_returns"
+    __table_args__ = (
+        UniqueConstraint("date_id", "factor_name", name="uq_factor_return_date_name"),
+        Index("idx_factor_returns_date", "date_id"),
+    )
+
+    factor_return_id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True
+    )
+    date_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("dim_date.date_id"), nullable=False
+    )
+    factor_name: Mapped[str] = mapped_column(String(30), nullable=False)
+    long_return: Mapped[float] = mapped_column(Numeric, nullable=False)
+    short_return: Mapped[float] = mapped_column(Numeric, nullable=False)
+    spread: Mapped[float] = mapped_column(Numeric, nullable=False)
 
 
 # ──────────────────────────────────────────

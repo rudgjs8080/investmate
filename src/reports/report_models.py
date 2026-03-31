@@ -141,6 +141,15 @@ class StockRecommendationDetail:
     beta: float | None = None
     forward_per: float | None = None
     is_pre_earnings: bool = False
+    # 포지션 사이징 (Step 4.6)
+    position_weight: float | None = None
+    trailing_stop: float | None = None
+    atr_stop: float | None = None
+    sizing_strategy: str | None = None
+    # 실행 비용 (영역 3)
+    spread_cost_bps: float | None = None
+    impact_cost_bps: float | None = None
+    total_cost_bps: float | None = None
 
 
 @dataclass(frozen=True)

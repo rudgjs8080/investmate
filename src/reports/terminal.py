@@ -288,6 +288,61 @@ def render_daily_report(report: EnrichedDailyReport) -> None:
         )
     console.print(top_table)
 
+    # 포지션 사이징 테이블 (비중 데이터가 있을 때만)
+    has_sizing = any(
+        rec.position_weight is not None for rec in report.recommendations
+    )
+    if has_sizing:
+        sizing_table = Table(title="추천 비중 (포지션 사이징)")
+        sizing_table.add_column("종목", style="cyan")
+        sizing_table.add_column("비중", justify="right", style="bold")
+        sizing_table.add_column("손절가", justify="right")
+        sizing_table.add_column("전략", justify="center", style="dim")
+
+        total_weight = 0.0
+        for rec in report.recommendations:
+            if rec.position_weight is None:
+                continue
+            w = rec.position_weight
+            total_weight += w
+            stop = ""
+            if rec.trailing_stop is not None:
+                stop = f"${rec.trailing_stop:,.2f}"
+            sizing_table.add_row(
+                rec.ticker,
+                f"{w:.1%}",
+                stop,
+                rec.sizing_strategy or "-",
+            )
+
+        cash_weight = max(0.0, 1.0 - total_weight)
+        sizing_table.add_row(
+            "[dim]현금[/dim]", f"[dim]{cash_weight:.1%}[/dim]", "", "",
+        )
+        console.print(sizing_table)
+
+    # 실행 비용 요약 (비용 데이터가 있을 때만)
+    has_cost = any(
+        rec.total_cost_bps is not None for rec in report.recommendations
+    )
+    if has_cost:
+        cost_table = Table(title="실행 현황")
+        cost_table.add_column("종목", style="cyan")
+        cost_table.add_column("스프레드", justify="right")
+        cost_table.add_column("시장충격", justify="right")
+        cost_table.add_column("총 비용", justify="right", style="bold")
+
+        for rec in report.recommendations:
+            if rec.total_cost_bps is None:
+                continue
+            cost_table.add_row(
+                rec.ticker,
+                f"{rec.spread_cost_bps:.1f}bps" if rec.spread_cost_bps else "-",
+                f"{rec.impact_cost_bps:.1f}bps" if rec.impact_cost_bps else "-",
+                f"{rec.total_cost_bps:.1f}bps",
+            )
+        console.print(cost_table)
+
     # 종목별 상세
     for rec in report.recommendations:
         _render_stock_panel(rec)

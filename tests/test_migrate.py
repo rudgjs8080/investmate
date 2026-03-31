@@ -62,12 +62,12 @@ class TestEnsureSchema:
         added = ensure_schema(engine)
         assert added == 0
 
-    def test_skips_nonexistent_tables(self):
-        """DB에 없는 테이블은 건너뛴다."""
+    def test_creates_missing_tables(self):
+        """DB에 없는 테이블은 자동 생성한다."""
         engine = _make_engine()
-        # 빈 DB에서 실행 — 테이블 없으므로 0
+        # 빈 DB에서 실행 — 신규 테이블 자동 생성
         added = ensure_schema(engine)
-        assert added == 0
+        assert added > 0
 
     def test_multiple_missing_columns(self):
         """여러 컬럼이 누락된 경우 모두 추가한다."""

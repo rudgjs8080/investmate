@@ -204,6 +204,13 @@ def _assemble_stock_detail(
         ai_risk_level=str(rec.ai_risk_level) if hasattr(rec, "ai_risk_level") and rec.ai_risk_level else None,
         ai_entry_strategy=str(rec.ai_entry_strategy) if hasattr(rec, "ai_entry_strategy") and rec.ai_entry_strategy else None,
         ai_exit_strategy=str(rec.ai_exit_strategy) if hasattr(rec, "ai_exit_strategy") and rec.ai_exit_strategy else None,
+        position_weight=float(rec.position_weight) if hasattr(rec, "position_weight") and rec.position_weight is not None else None,
+        trailing_stop=float(rec.trailing_stop) if hasattr(rec, "trailing_stop") and rec.trailing_stop is not None else None,
+        atr_stop=float(rec.atr_stop) if hasattr(rec, "atr_stop") and rec.atr_stop is not None else None,
+        sizing_strategy=str(rec.sizing_strategy) if hasattr(rec, "sizing_strategy") and rec.sizing_strategy else None,
+        spread_cost_bps=float(rec.spread_cost_bps) if hasattr(rec, "spread_cost_bps") and rec.spread_cost_bps is not None else None,
+        impact_cost_bps=float(rec.impact_cost_bps) if hasattr(rec, "impact_cost_bps") and rec.impact_cost_bps is not None else None,
+        total_cost_bps=float(rec.total_cost_bps) if hasattr(rec, "total_cost_bps") and rec.total_cost_bps is not None else None,
     )
 
 

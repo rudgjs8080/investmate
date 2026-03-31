@@ -172,6 +172,7 @@ def screen_and_rank(
     news_sentiment: float = 0.0,
     sector_momentum: dict[str, float] | None = None,
     rs_ranks: dict[int, float] | None = None,
+    scoring_mode: str = "legacy",
 ) -> list[RecommendationData]:
     """S&P 500 전 종목을 스크리닝하고 랭킹한다.
 
@@ -240,6 +241,22 @@ def screen_and_rank(
     except Exception as e:
         logger.debug("실적 캘린더 조회 실패: %s", e)
 
+    # 팩터 점수 사전 계산 (factor/blend 모드)
+    _composite_scores_cache: dict[int, object] = {}
+    if scoring_mode in ("factor", "blend"):
+        try:
+            from src.analysis.factors import compute_composite_scores
+
+            stock_ids = [s.stock_id for s in stocks]
+            regime_name = regime.regime if regime else None
+            _composite_scores_cache = compute_composite_scores(
+                session, stock_ids, run_date, regime=regime_name,
+            )
+            logger.info("팩터 점수 계산 완료: %d 종목", len(_composite_scores_cache))
+        except Exception as e:
+            logger.warning("팩터 점수 계산 실패, legacy fallback: %s", e)
+            scoring_mode = "legacy"
+
     candidates: list[dict] = []
 
     for stock in stocks:
@@ -271,25 +288,41 @@ def screen_and_rank(
                 continue
 
             # ── 2단계: 스코어링 ──
-            tech_score = _score_technical(indicators_df, session, stock.stock_id)
             sector_name = stock.sector.sector_name if stock.sector else None
-            sector_meds = all_sector_medians.get(sector_name) if sector_name else None
-            fund_score = _score_fundamental(session, stock.stock_id, sector_medians=sector_meds)
-            smart_score = _score_smart_money(session, stock.stock_id, latest)
-            ext_score = _score_external(
-                market_score, news_sentiment,
-                sector_momentum, stock.sector,
-            )
-            rs_pct = rs_ranks.get(stock.stock_id) if rs_ranks else None
-            mom_score = _score_momentum(df, latest, vix=current_vix, rs_percentile=rs_pct)
 
-            total = (
-                tech_score * weights["technical"]
-                + fund_score * weights["fundamental"]
-                + smart_score * weights["smart_money"]
-                + ext_score * weights["external"]
-                + mom_score * weights["momentum"]
-            )
+            # 레거시 스코어 계산 (legacy/blend 모드에서 사용)
+            if scoring_mode in ("legacy", "blend"):
+                legacy_total, legacy_scores = _legacy_score(
+                    session, stock, indicators_df, latest, df,
+                    weights, market_score, news_sentiment,
+                    sector_momentum, current_vix, rs_ranks,
+                    all_sector_medians,
+                )
+                tech_score = legacy_scores["technical"]
+                fund_score = legacy_scores["fundamental"]
+                smart_score = legacy_scores["smart_money"]
+                ext_score = legacy_scores["external"]
+                mom_score = legacy_scores["momentum"]
+            else:
+                legacy_total = 5.0
+                tech_score = fund_score = smart_score = ext_score = mom_score = 5.0
+
+            # 팩터 스코어 계산 (factor/blend 모드에서 사용)
+            if scoring_mode in ("factor", "blend"):
+                factor_cs = _composite_scores_cache.get(stock.stock_id)
+                factor_total = _score_factor_based(factor_cs) if factor_cs else 5.0
+            else:
+                factor_total = 5.0
+
+            # 최종 점수 결정
+            if scoring_mode == "legacy":
+                total = legacy_total
+            elif scoring_mode == "factor":
+                total = factor_total
+            else:
+                from src.config import get_settings as _gs
+                blend_ratio = _gs().factor_blend_ratio
+                total = legacy_total * (1 - blend_ratio) + factor_total * blend_ratio
 
             reason = _generate_reason(
                 stock.ticker, tech_score, fund_score, ext_score, mom_score, latest,
@@ -299,7 +332,7 @@ def screen_and_rank(
             # 팩터 어트리뷰션: 각 팩터가 총점에 기여한 비율(%)
             factor_attribution = _compute_factor_attribution(
                 tech_score, fund_score, smart_score, ext_score, mom_score,
-                weights, total,
+                weights, total if total > 0 else 1.0,
             )
             attribution_suffix = (
                 f" [팩터: 기술{factor_attribution['technical']}%"
@@ -1063,3 +1096,63 @@ def update_recommendation_returns(
         session.flush()
 
     return updated
+
+
+# ──────────────────────────────────────────
+# 레거시 스코어링 + 팩터 변환
+# ──────────────────────────────────────────
+
+
+def _legacy_score(
+    session: Session,
+    stock: object,
+    indicators_df: pd.DataFrame,
+    latest: pd.Series,
+    df: pd.DataFrame,
+    weights: dict[str, float],
+    market_score: int,
+    news_sentiment: float,
+    sector_momentum: dict[str, float] | None,
+    current_vix: float | None,
+    rs_ranks: dict[int, float] | None,
+    all_sector_medians: dict[str, dict[str, float]] | None,
+) -> tuple[float, dict[str, float]]:
+    """기존 5차원 스코어링 (레거시). A/B 비교용 보존."""
+    tech_score = _score_technical(indicators_df, session, stock.stock_id)
+    sector_name = stock.sector.sector_name if stock.sector else None
+    sector_meds = (all_sector_medians or {}).get(sector_name) if sector_name else None
+    fund_score = _score_fundamental(session, stock.stock_id, sector_medians=sector_meds)
+    smart_score = _score_smart_money(session, stock.stock_id, latest)
+    ext_score = _score_external(
+        market_score, news_sentiment, sector_momentum, stock.sector,
+    )
+    rs_pct = rs_ranks.get(stock.stock_id) if rs_ranks else None
+    mom_score = _score_momentum(df, latest, vix=current_vix, rs_percentile=rs_pct)
+
+    total = (
+        tech_score * weights["technical"]
+        + fund_score * weights["fundamental"]
+        + smart_score * weights["smart_money"]
+        + ext_score * weights["external"]
+        + mom_score * weights["momentum"]
+    )
+
+    scores = {
+        "technical": tech_score,
+        "fundamental": fund_score,
+        "smart_money": smart_score,
+        "external": ext_score,
+        "momentum": mom_score,
+    }
+    return total, scores
+
+
+def _score_factor_based(factor_score: object | None) -> float:
+    """팩터 z-score composite → 1-10 스케일 변환.
+
+    z=0 → 5.5, z=+2 → ~9.5, z=-2 → ~1.5
+    """
+    if factor_score is None:
+        return 5.0
+    composite = getattr(factor_score, "composite", 0.0)
+    return max(1.0, min(10.0, 5.5 + composite * 2.0))

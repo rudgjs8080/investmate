@@ -26,6 +26,7 @@ from src.db.models import (
     FactInsiderTrade,
     FactInstitutionalHolding,
     FactMacroIndicator,
+    FactFactorReturn,
     FactNews,
     FactSignal,
     FactValuation,
@@ -724,4 +725,62 @@ class EarningsSurpriseRepository:
             .order_by(FactEarningsSurprise.date_id.desc())
             .limit(limit)
         )
+        return list(session.execute(stmt).scalars().all())
+
+
+class FactorReturnRepository:
+    """팩터 수익률 CRUD."""
+
+    @staticmethod
+    def upsert_batch(session: Session, records: list[dict]) -> int:
+        """팩터 수익률을 배치 UPSERT한다."""
+        if not records:
+            return 0
+
+        now = datetime.now()
+        for rec in records:
+            stmt = sqlite_insert(FactFactorReturn).values(**rec)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["date_id", "factor_name"],
+                set_={
+                    "long_return": stmt.excluded.long_return,
+                    "short_return": stmt.excluded.short_return,
+                    "spread": stmt.excluded.spread,
+                    "updated_at": now,
+                },
+            )
+            session.execute(stmt)
+
+        session.flush()
+        return len(records)
+
+    @staticmethod
+    def get_by_factor(
+        session: Session,
+        factor_name: str,
+        start_date_id: int | None = None,
+        end_date_id: int | None = None,
+    ) -> list[FactFactorReturn]:
+        """특정 팩터의 수익률 시계열을 조회한다."""
+        stmt = (
+            select(FactFactorReturn)
+            .where(FactFactorReturn.factor_name == factor_name)
+        )
+        if start_date_id is not None:
+            stmt = stmt.where(FactFactorReturn.date_id >= start_date_id)
+        if end_date_id is not None:
+            stmt = stmt.where(FactFactorReturn.date_id <= end_date_id)
+        stmt = stmt.order_by(FactFactorReturn.date_id)
+        return list(session.execute(stmt).scalars().all())
+
+    @staticmethod
+    def get_all_factors(
+        session: Session,
+        start_date_id: int | None = None,
+    ) -> list[FactFactorReturn]:
+        """전체 팩터 수익률을 조회한다."""
+        stmt = select(FactFactorReturn)
+        if start_date_id is not None:
+            stmt = stmt.where(FactFactorReturn.date_id >= start_date_id)
+        stmt = stmt.order_by(FactFactorReturn.date_id, FactFactorReturn.factor_name)
         return list(session.execute(stmt).scalars().all())

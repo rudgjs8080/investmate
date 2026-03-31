@@ -58,6 +58,13 @@ def ensure_schema(engine: Engine) -> int:
 
     for table_name, table in Base.metadata.tables.items():
         if table_name not in existing_tables:
+            # 신규 테이블 자동 생성
+            try:
+                table.create(bind=engine)
+                logger.info("신규 테이블 생성: %s", table_name)
+                added += 1
+            except Exception as e:
+                logger.warning("테이블 생성 실패 (%s): %s", table_name, e)
             continue
 
         db_cols = _get_db_columns(engine, table_name)

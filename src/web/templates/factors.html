@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}팩터 대시보드{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <h1 class="text-2xl font-bold">팩터 투자 대시보드</h1>
+    <p class="text-sm text-gray-400">S&P 500 팩터별 롱숏 스프레드 수익률 추적</p>
+</div>
+
+<!-- 팩터 모멘텀 KPI -->
+<div class="grid grid-cols-2 sm:grid-cols-5 gap-4 mb-8">
+{% for name in ['value', 'momentum', 'quality', 'low_vol', 'size'] %}
+{% set labels = {'value': '가치', 'momentum': '모멘텀', 'quality': '품질', 'low_vol': '저변동성', 'size': '규모'} %}
+<div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm">
+    <p class="text-xs text-gray-500 mb-1">{{ labels[name] }}</p>
+    {% if factor_data.get('momentum', {}).get(name) %}
+    {% set m = factor_data['momentum'][name] %}
+    <p class="text-lg font-bold {% if m['3m'] > 0 %}text-green-500{% elif m['3m'] < 0 %}text-red-500{% else %}text-gray-500{% endif %}">
+        {{ '%+.1f'|format(m['3m']) }}%
+    </p>
+    <p class="text-xs text-gray-400">3개월 누적</p>
+    {% else %}
+    <p class="text-lg font-bold text-gray-400">-</p>
+    <p class="text-xs text-gray-400">데이터 없음</p>
+    {% endif %}
+</div>
+{% endfor %}
+</div>
+
+<!-- 차트 영역 -->
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+    <!-- 누적 수익률 차트 -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm">
+        <h3 class="text-sm font-semibold mb-3">팩터별 누적 수익률</h3>
+        <div id="factor-returns-chart" style="height: 350px;"></div>
+    </div>
+
+    <!-- 상관관계 히트맵 -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm">
+        <h3 class="text-sm font-semibold mb-3">팩터 상관관계</h3>
+        <div id="factor-corr-chart" style="height: 350px;"></div>
+    </div>
+</div>
+
+<!-- IC 추이 -->
+<div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm mb-8">
+    <div class="flex items-center gap-3 mb-3">
+        <h3 class="text-sm font-semibold">Information Coefficient 추이</h3>
+        <select id="ic-factor-select" class="text-sm bg-gray-100 dark:bg-gray-700 rounded px-2 py-1">
+            <option value="value">가치</option>
+            <option value="momentum">모멘텀</option>
+            <option value="quality">품질</option>
+            <option value="low_vol">저변동성</option>
+            <option value="size">규모</option>
+        </select>
+    </div>
+    <div id="factor-ic-chart" style="height: 300px;"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<script>
+const FACTOR_LABELS = {value:'가치', momentum:'모멘텀', quality:'품질', low_vol:'저변동성', size:'규모'};
+const FACTOR_COLORS = {value:'#6366f1', momentum:'#f59e0b', quality:'#10b981', low_vol:'#3b82f6', size:'#ef4444'};
+
+// 누적 수익률 차트
+fetch('/api/factors/returns?days=252')
+.then(r => r.json())
+.then(data => {
+    const chart = echarts.init(document.getElementById('factor-returns-chart'));
+    const series = [];
+    for (const [name, points] of Object.entries(data.factors || {})) {
+        series.push({
+            name: FACTOR_LABELS[name] || name,
+            type: 'line', smooth: true, showSymbol: false,
+            itemStyle: {color: FACTOR_COLORS[name] || '#999'},
+            data: points.map(p => [p.date, p.cumulative]),
+        });
+    }
+    chart.setOption({
+        tooltip: {trigger: 'axis'},
+        legend: {bottom: 0, textStyle: {fontSize: 11}},
+        grid: {top: 10, right: 20, bottom: 40, left: 50},
+        xAxis: {type: 'time'},
+        yAxis: {type: 'value', name: '누적 (%)', axisLabel: {formatter: '{value}%'}},
+        series: series,
+    });
+    window.addEventListener('resize', () => chart.resize());
+});
+
+// 상관관계 히트맵
+fetch('/api/factors/correlation?days=252')
+.then(r => r.json())
+.then(data => {
+    const chart = echarts.init(document.getElementById('factor-corr-chart'));
+    const labels = (data.factors || []).map(f => FACTOR_LABELS[f] || f);
+    const heatData = [];
+    (data.correlation || []).forEach((row, i) => {
+        row.forEach((val, j) => heatData.push([j, i, val]));
+    });
+    chart.setOption({
+        tooltip: {formatter: p => `${labels[p.data[1]]} × ${labels[p.data[0]]}: ${p.data[2]}`},
+        xAxis: {type: 'category', data: labels, axisLabel: {fontSize: 11}},
+        yAxis: {type: 'category', data: labels, axisLabel: {fontSize: 11}},
+        visualMap: {min: -1, max: 1, calculable: true, orient: 'horizontal', left: 'center', bottom: 0,
+            inRange: {color: ['#3b82f6', '#f8fafc', '#ef4444']}},
+        series: [{type: 'heatmap', data: heatData, label: {show: true, formatter: p => p.data[2].toFixed(2), fontSize: 12}}],
+    });
+    window.addEventListener('resize', () => chart.resize());
+});
+
+// IC 추이
+function loadIC(factor) {
+    fetch(`/api/factors/ic?factor=${factor}&days=252`)
+    .then(r => r.json())
+    .then(data => {
+        const chart = echarts.init(document.getElementById('factor-ic-chart'));
+        chart.setOption({
+            tooltip: {trigger: 'axis'},
+            grid: {top: 10, right: 20, bottom: 30, left: 50},
+            xAxis: {type: 'time'},
+            yAxis: {type: 'value', name: 'IC'},
+            series: [{
+                type: 'bar', data: (data.ic || []).map(p => [p.date, p.ic]),
+                itemStyle: {color: p => p.data[1] >= 0 ? '#10b981' : '#ef4444'},
+            }],
+        });
+        window.addEventListener('resize', () => chart.resize());
+    });
+}
+loadIC('value');
+document.getElementById('ic-factor-select').addEventListener('change', e => loadIC(e.target.value));
+</script>
+{% endblock %}

@@ -129,9 +129,7 @@ class BacktestEngine:
                 config=config, total_days=0, total_recommendations=0,
             )
 
-        # 거래 비용 로드 (bps -> %)
         settings = get_settings()
-        tx_cost_pct = settings.transaction_cost_bps / 100
 
         # 일별 그룹핑
         by_date: dict[int, list[tuple]] = {}
@@ -147,14 +145,15 @@ class BacktestEngine:
             date_id = rec.run_date_id
             by_date.setdefault(date_id, []).append((rec, ticker))
 
+            # 수익률은 performance.py에서 이미 거래비용 차감 완료 — 재차감 금지
             if rec.return_1d is not None:
-                all_returns_1d.append(float(rec.return_1d) - tx_cost_pct)
+                all_returns_1d.append(float(rec.return_1d))
             if rec.return_5d is not None:
-                all_returns_5d.append(float(rec.return_5d) - tx_cost_pct)
+                all_returns_5d.append(float(rec.return_5d))
             if rec.return_10d is not None:
-                all_returns_10d.append(float(rec.return_10d) - tx_cost_pct)
+                all_returns_10d.append(float(rec.return_10d))
             if rec.return_20d is not None:
-                r20 = float(rec.return_20d) - tx_cost_pct
+                r20 = float(rec.return_20d)
                 all_returns_20d.append(r20)
                 try:
                     d_str = id_to_date(date_id).isoformat()
@@ -169,10 +168,10 @@ class BacktestEngine:
         daily_results = []
         for d_id in sorted(by_date.keys()):
             recs = by_date[d_id]
-            r1 = [float(r.return_1d) - tx_cost_pct for r, _ in recs if r.return_1d is not None]
-            r5 = [float(r.return_5d) - tx_cost_pct for r, _ in recs if r.return_5d is not None]
-            r10 = [float(r.return_10d) - tx_cost_pct for r, _ in recs if r.return_10d is not None]
-            r20 = [float(r.return_20d) - tx_cost_pct for r, _ in recs if r.return_20d is not None]
+            r1 = [float(r.return_1d) for r, _ in recs if r.return_1d is not None]
+            r5 = [float(r.return_5d) for r, _ in recs if r.return_5d is not None]
+            r10 = [float(r.return_10d) for r, _ in recs if r.return_10d is not None]
+            r20 = [float(r.return_20d) for r, _ in recs if r.return_20d is not None]
             try:
                 run_date = id_to_date(d_id)
             except Exception:
