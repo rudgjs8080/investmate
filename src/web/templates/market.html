@@ -43,7 +43,7 @@
     {% for id, title in [('vixChart', 'VIX 추이 (3년)'), ('sp500Chart', 'S&P 500 추이 (3년)')] %}
     <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4">
         <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">{{ title }}</div>
-        <div id="{{ id }}" style="height:260px"></div>
+        <div id="{{ id }}" class="chart-md"></div>
     </div>
     {% endfor %}
 </div>
@@ -51,7 +51,7 @@
     {% for id, title in [('yieldChart', '10Y 금리 추이 (3년)'), ('dollarChart', '달러 인덱스 추이 (3년)')] %}
     <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4">
         <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">{{ title }}</div>
-        <div id="{{ id }}" style="height:260px"></div>
+        <div id="{{ id }}" class="chart-md"></div>
     </div>
     {% endfor %}
 </div>
@@ -68,8 +68,14 @@
 {% if macro %}
 <script>
 fetch('/api/macro-history?days=1095').then(r=>r.json()).then(d => {
-    const mk = (id, vals, color) => { const c = initChart(id); if (c && vals) c.setOption(lineChartOption(d.labels, vals, color, { dataZoom: true })); };
-    mk('vixChart', d.vix, COLORS.red);
+    const mk = (id, vals, color, extra) => { const c = initChart(id); if (c && vals) c.setOption(lineChartOption(d.labels, vals, color, Object.assign({ dataZoom: true, toolbox: true }, extra || {}))); };
+    mk('vixChart', d.vix, COLORS.red, {
+        markLines: [
+            { value: 20, label: '안정 20', color: '#10b981' },
+            { value: 25, label: '주의 25', color: '#f59e0b' },
+            { value: 30, label: '공포 30', color: '#ef4444', type: 'solid', width: 2 },
+        ]
+    });
     mk('sp500Chart', d.sp500, COLORS.blue);
     mk('yieldChart', d.yield_10y, COLORS.orange);
     mk('dollarChart', d.dollar, COLORS.green);

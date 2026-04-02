@@ -32,13 +32,13 @@
     <!-- 누적 수익률 차트 -->
     <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm">
         <h3 class="text-sm font-semibold mb-3">팩터별 누적 수익률</h3>
-        <div id="factor-returns-chart" style="height: 350px;"></div>
+        <div id="factor-returns-chart" class="chart-lg"></div>
     </div>
 
     <!-- 상관관계 히트맵 -->
     <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm">
         <h3 class="text-sm font-semibold mb-3">팩터 상관관계</h3>
-        <div id="factor-corr-chart" style="height: 350px;"></div>
+        <div id="factor-corr-chart" class="chart-lg"></div>
     </div>
 </div>
 
@@ -54,19 +54,19 @@
             <option value="size">규모</option>
         </select>
     </div>
-    <div id="factor-ic-chart" style="height: 300px;"></div>
+    <div id="factor-ic-chart" class="chart-md"></div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
 <script>
 const FACTOR_LABELS = {value:'가치', momentum:'모멘텀', quality:'품질', low_vol:'저변동성', size:'규모'};
 const FACTOR_COLORS = {value:'#6366f1', momentum:'#f59e0b', quality:'#10b981', low_vol:'#3b82f6', size:'#ef4444'};
 
-// 누적 수익률 차트
+// 누적 수익률 차트 — initChart + multi-series lineChartOption 활용
 fetch('/api/factors/returns?days=252')
 .then(r => r.json())
 .then(data => {
-    const chart = echarts.init(document.getElementById('factor-returns-chart'));
+    const chart = initChart('factor-returns-chart');
+    if (!chart) return;
     const series = [];
     for (const [name, points] of Object.entries(data.factors || {})) {
         series.push({
@@ -77,54 +77,54 @@ fetch('/api/factors/returns?days=252')
         });
     }
     chart.setOption({
-        tooltip: {trigger: 'axis'},
+        tooltip: chartTooltip({ crosshair: true }),
         legend: {bottom: 0, textStyle: {fontSize: 11}},
         grid: {top: 10, right: 20, bottom: 40, left: 50},
         xAxis: {type: 'time'},
-        yAxis: {type: 'value', name: '누적 (%)', axisLabel: {formatter: '{value}%'}},
+        yAxis: {type: 'value', name: '누적 (%)', min: 'dataMin', max: 'dataMax', axisLabel: {formatter: '{value}%'}},
         series: series,
     });
-    window.addEventListener('resize', () => chart.resize());
 });
 
 // 상관관계 히트맵
 fetch('/api/factors/correlation?days=252')
 .then(r => r.json())
 .then(data => {
-    const chart = echarts.init(document.getElementById('factor-corr-chart'));
+    const chart = initChart('factor-corr-chart');
+    if (!chart) return;
     const labels = (data.factors || []).map(f => FACTOR_LABELS[f] || f);
     const heatData = [];
     (data.correlation || []).forEach((row, i) => {
         row.forEach((val, j) => heatData.push([j, i, val]));
     });
     chart.setOption({
-        tooltip: {formatter: p => `${labels[p.data[1]]} × ${labels[p.data[0]]}: ${p.data[2]}`},
+        tooltip: {formatter: p => `${labels[p.data[1]]} × ${labels[p.data[0]]}: ${p.data[2].toFixed(3)}`},
         xAxis: {type: 'category', data: labels, axisLabel: {fontSize: 11}},
         yAxis: {type: 'category', data: labels, axisLabel: {fontSize: 11}},
         visualMap: {min: -1, max: 1, calculable: true, orient: 'horizontal', left: 'center', bottom: 0,
             inRange: {color: ['#3b82f6', '#f8fafc', '#ef4444']}},
         series: [{type: 'heatmap', data: heatData, label: {show: true, formatter: p => p.data[2].toFixed(2), fontSize: 12}}],
     });
-    window.addEventListener('resize', () => chart.resize());
 });
 
 // IC 추이
+var _icChart = null;
 function loadIC(factor) {
     fetch(`/api/factors/ic?factor=${factor}&days=252`)
     .then(r => r.json())
     .then(data => {
-        const chart = echarts.init(document.getElementById('factor-ic-chart'));
-        chart.setOption({
-            tooltip: {trigger: 'axis'},
+        if (!_icChart) _icChart = initChart('factor-ic-chart');
+        if (!_icChart) return;
+        _icChart.setOption({
+            tooltip: chartTooltip({ shadow: true }),
             grid: {top: 10, right: 20, bottom: 30, left: 50},
             xAxis: {type: 'time'},
-            yAxis: {type: 'value', name: 'IC'},
+            yAxis: {type: 'value', name: 'IC', min: 'dataMin', max: 'dataMax'},
             series: [{
                 type: 'bar', data: (data.ic || []).map(p => [p.date, p.ic]),
                 itemStyle: {color: p => p.data[1] >= 0 ? '#10b981' : '#ef4444'},
             }],
-        });
-        window.addEventListener('resize', () => chart.resize());
+        }, true);
     });
 }
 loadIC('value');

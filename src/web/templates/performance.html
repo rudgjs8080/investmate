@@ -103,33 +103,33 @@
 <div class="grid md:grid-cols-2 gap-4 mb-5">
     <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4">
         <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">승률 추이</div>
-        <div id="winRateChart" style="height:240px"></div>
+        <div id="winRateChart" class="chart-md"></div>
     </div>
     <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4">
         <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">누적 수익률</div>
-        <div id="equityCurve" style="height:240px"></div>
-        <div id="equityCurveEmpty" class="hidden text-center text-xs text-gray-400 mt-2">데이터가 축적되면 차트가 표시됩니다</div>
+        <div id="equityCurve" class="chart-md"></div>
+        <div id="equityCurveEmpty" class="hidden chart-empty"><div class="chart-empty-icon">📈</div><div class="chart-empty-text">데이터가 축적되면 차트가 표시됩니다</div></div>
     </div>
 </div>
 
 <div class="grid md:grid-cols-2 gap-4 mb-5">
     <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4">
         <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">섹터별 수익률</div>
-        <div id="sectorBar" style="height:240px"></div>
-        <div id="sectorBarEmpty" class="hidden text-center text-xs text-gray-400 mt-2">섹터 데이터 축적 중</div>
+        <div id="sectorBar" class="chart-md"></div>
+        <div id="sectorBarEmpty" class="hidden chart-empty"><div class="chart-empty-icon">📊</div><div class="chart-empty-text">섹터 데이터 축적 중</div></div>
     </div>
     <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4">
         <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">최고/최저 종목</div>
-        <div id="topWorstChart" style="height:240px"></div>
-        <div id="topWorstEmpty" class="hidden text-center text-xs text-gray-400 mt-2">수익률 데이터 축적 중</div>
+        <div id="topWorstChart" class="chart-md"></div>
+        <div id="topWorstEmpty" class="hidden chart-empty"><div class="chart-empty-icon">📊</div><div class="chart-empty-text">수익률 데이터 축적 중</div></div>
     </div>
 </div>
 
 <!-- 수익률 분포 -->
 <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 mb-5">
     <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">수익률 분포</div>
-    <div id="distChart" style="height:220px"></div>
-    <div id="distChartEmpty" class="hidden text-center text-xs text-gray-400 mt-2">분포 데이터 축적 중</div>
+    <div id="distChart" class="chart-sm"></div>
+    <div id="distChartEmpty" class="hidden chart-empty"><div class="chart-empty-icon">📊</div><div class="chart-empty-text">분포 데이터 축적 중</div></div>
 </div>
 
 <!-- 최근 추천 테이블 -->
@@ -223,13 +223,13 @@
 <script>
 // 승률 차트
 const wr = initChart('winRateChart');
-if (wr) wr.setOption(barChartOption(['1일','5일','10일','20일'], [{{ perf.win_rate_1d or 0 }}, {{ perf.win_rate_5d or 0 }}, {{ perf.win_rate_10d or 0 }}, {{ perf.win_rate_20d or 0 }}], [COLORS.cyan, COLORS.blue, COLORS.primary, COLORS.purple], { yMax: 100 }));
+if (wr) wr.setOption(barChartOption(['1일','5일','10일','20일'], [{{ perf.win_rate_1d or 0 }}, {{ perf.win_rate_5d or 0 }}, {{ perf.win_rate_10d or 0 }}, {{ perf.win_rate_20d or 0 }}], [COLORS.cyan, COLORS.blue, COLORS.primary, COLORS.purple], { yMax: 100, unit: '%', decimals: 0 }));
 
 // 누적 수익률
 fetch('/api/equity-curve?days={{ days }}').then(r=>r.json()).then(d => {
     const c = initChart('equityCurve');
     if (c && d.labels && d.labels.length) {
-        c.setOption(lineChartOption(d.labels, d.values, COLORS.blue, { dataZoom: true }));
+        c.setOption(lineChartOption(d.labels, d.values, COLORS.blue, { dataZoom: true, unit: '%', decimals: 2, toolbox: true }));
     } else {
         document.getElementById('equityCurveEmpty')?.classList.remove('hidden');
     }
@@ -243,7 +243,7 @@ fetch('/api/sector-heatmap?days={{ days }}').then(r=>r.json()).then(d => {
     if (!sectors.length) { document.getElementById('sectorBarEmpty')?.classList.remove('hidden'); return; }
     sectors.sort((a,b) => d[b].avg_return - d[a].avg_return);
     const returns = sectors.map(s => d[s].avg_return);
-    c.setOption(barChartOption(sectors, returns, returns.map(r => r > 0 ? COLORS.green : COLORS.red), { horizontal: true }));
+    c.setOption(barChartOption(sectors, returns, returns.map(r => r > 0 ? COLORS.green : COLORS.red), { horizontal: true, unit: '%', decimals: 1 }));
 }).catch(e => console.error(e));
 
 // 최고/최저
@@ -253,7 +253,7 @@ fetch('/api/top-worst-picks?n=5&days={{ days }}').then(r=>r.json()).then(d => {
     if (!d.top.length && !d.worst.length) { document.getElementById('topWorstEmpty')?.classList.remove('hidden'); return; }
     const labels = [...d.top.map(x=>x.ticker), ...d.worst.map(x=>x.ticker)];
     const values = [...d.top.map(x=>x.return), ...d.worst.map(x=>x.return)];
-    c.setOption(barChartOption(labels, values, values.map(v => v > 0 ? COLORS.green : COLORS.red), { horizontal: true }));
+    c.setOption(barChartOption(labels, values, values.map(v => v > 0 ? COLORS.green : COLORS.red), { horizontal: true, unit: '%', decimals: 1 }));
 }).catch(e => console.error(e));
 
 // 수익률 분포

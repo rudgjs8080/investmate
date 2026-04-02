@@ -255,3 +255,31 @@ def sparkline_data(
 
     prices = [float(p) for p in reversed(rows)]
     return {"prices": prices}
+
+
+@router.get("/sparklines")
+def batch_sparklines(
+    tickers: str = Query(description="콤마 구분 티커 목록"),
+    days: int = Query(default=5, ge=1, le=30),
+    db: Session = Depends(get_db),
+) -> dict[str, list[float]]:
+    """여러 종목의 스파크라인 데이터를 한번에 반환한다."""
+    ticker_list = [t.strip().upper() for t in tickers.split(",") if t.strip()]
+    if not ticker_list:
+        return {}
+
+    stocks = db.execute(
+        select(DimStock).where(DimStock.ticker.in_(ticker_list))
+    ).scalars().all()
+
+    result: dict[str, list[float]] = {}
+    for stock in stocks:
+        rows = db.execute(
+            select(FactDailyPrice.adj_close)
+            .where(FactDailyPrice.stock_id == stock.stock_id)
+            .order_by(FactDailyPrice.date_id.desc())
+            .limit(days)
+        ).scalars().all()
+        result[stock.ticker] = [float(p) for p in reversed(rows)]
+
+    return result

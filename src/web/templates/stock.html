@@ -47,7 +47,7 @@
 <!-- 캔들스틱 차트 -->
 <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 mb-5">
     <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">가격 차트 (3년) + 이동평균선</div>
-    <div id="priceChart" role="img" aria-label="가격 캔들스틱 차트" style="height:420px"></div>
+    <div id="priceChart" role="img" aria-label="가격 캔들스틱 차트" class="chart-xl"></div>
 </div>
 
 <!-- KPI 카드 -->
@@ -146,7 +146,7 @@
 {% if rec_history and rec_history|length > 1 %}
 <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 mb-5">
     <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">추천 점수 추이</div>
-    <div id="scoreChart" role="img" aria-label="추천 점수 추이 차트" style="height:200px"></div>
+    <div id="scoreChart" role="img" aria-label="추천 점수 추이 차트" class="chart-sm"></div>
 </div>
 {% endif %}
 
@@ -207,7 +207,7 @@ fetch('/api/stock/{{ stock.ticker }}/prices?days=1095').then(r=>r.json()).then(d
     c.setOption({
         tooltip: { trigger: 'axis', axisPointer: { type: 'cross' }, backgroundColor: 'rgba(15,23,42,0.9)', textStyle: { color: '#fff', fontSize: 11 } },
         legend: { data: series.map(s => s.name), top: 0, textStyle: { fontSize: 11 } },
-        grid: [{ left: '8%', right: '3%', top: '10%', height: '52%' }, { left: '8%', right: '3%', top: '70%', height: '16%' }],
+        grid: [{ left: '8%', right: '3%', top: '10%', height: '48%' }, { left: '8%', right: '3%', top: '66%', height: '22%' }],
         xAxis: [{ type: 'category', data: d.dates, axisLabel: { fontSize: 9 }, gridIndex: 0, boundaryGap: true }, { type: 'category', data: d.dates, axisLabel: { show: false }, gridIndex: 1, boundaryGap: true }],
         yAxis: [{ scale: true, splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' }}, gridIndex: 0 }, { scale: true, splitLine: { show: false }, gridIndex: 1, axisLabel: { show: false } }],
         dataZoom: [{ type: 'inside', xAxisIndex: [0, 1], start: 40, end: 100 }, { type: 'slider', xAxisIndex: [0, 1], bottom: '2%', height: 15 }],
@@ -219,10 +219,10 @@ fetch('/api/stock/{{ stock.ticker }}/prices?days=1095').then(r=>r.json()).then(d
     const srData = {{ sr_levels | tojson }};
     const markLines = [];
     (srData.supports || []).forEach(s => {
-        markLines.push({ yAxis: s.price, name: `S $${s.price}`, lineStyle: { color: '#10b981', type: 'dashed', width: 1 }, label: { formatter: `S ${s.price}`, position: 'start', fontSize: 10, color: '#10b981' } });
+        markLines.push({ yAxis: s.price, name: `S $${s.price}`, lineStyle: { color: '#10b981', type: 'dashed', width: 1.5, opacity: 0.8 }, label: { formatter: `S ${s.price}`, position: 'start', fontSize: 10, color: '#10b981' } });
     });
     (srData.resistances || []).forEach(r => {
-        markLines.push({ yAxis: r.price, name: `R $${r.price}`, lineStyle: { color: '#ef4444', type: 'dashed', width: 1 }, label: { formatter: `R ${r.price}`, position: 'start', fontSize: 10, color: '#ef4444' } });
+        markLines.push({ yAxis: r.price, name: `R $${r.price}`, lineStyle: { color: '#ef4444', type: 'dashed', width: 1.5, opacity: 0.8 }, label: { formatter: `R ${r.price}`, position: 'start', fontSize: 10, color: '#ef4444' } });
     });
     if (markLines.length > 0) {
         c.setOption({ series: [{ name: '가격', markLine: { silent: true, symbol: 'none', data: markLines } }] }, { replaceMerge: [] });

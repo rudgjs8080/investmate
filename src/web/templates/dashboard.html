@@ -153,21 +153,21 @@
         <div class="grid grid-cols-2 gap-4">
             <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4">
                 <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">누적 수익률</div>
-                <div id="equityChart" style="height:200px"></div>
-                <div id="equityEmpty" class="hidden text-center text-xs text-gray-400 mt-2">데이터가 축적되면 차트가 표시됩니다</div>
+                <div id="equityChart" class="chart-sm"></div>
+                <div id="equityEmpty" class="hidden chart-empty"><div class="chart-empty-icon">📈</div><div class="chart-empty-text">데이터가 축적되면 차트가 표시됩니다</div></div>
             </div>
             <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4">
                 <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">VIX 추이</div>
-                <div id="vixMini" style="height:200px"></div>
+                <div id="vixMini" class="chart-sm"></div>
             </div>
             <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4">
                 <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">S&P 500 추이</div>
-                <div id="sp500Mini" style="height:200px"></div>
+                <div id="sp500Mini" class="chart-sm"></div>
             </div>
             <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4">
                 <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">최고/최저 종목</div>
-                <div id="topWorstMini" style="height:200px"></div>
-                <div id="topWorstEmpty" class="hidden text-center text-xs text-gray-400 mt-2">수익률 데이터가 축적되면 표시됩니다</div>
+                <div id="topWorstMini" class="chart-sm"></div>
+                <div id="topWorstEmpty" class="hidden chart-empty"><div class="chart-empty-icon">📊</div><div class="chart-empty-text">수익률 데이터가 축적되면 표시됩니다</div></div>
             </div>
         </div>
     </div>
@@ -221,7 +221,7 @@ fetch('/api/equity-curve?days=1095').then(r=>r.json()).then(d => {
 
 fetch('/api/macro-history?days=1095').then(r=>r.json()).then(d => {
     const v = initChart('vixMini');
-    if (v && d.vix) v.setOption(lineChartOption(d.labels, d.vix, COLORS.red, { dataZoom: true }));
+    if (v && d.vix) v.setOption(lineChartOption(d.labels, d.vix, COLORS.red, { dataZoom: true, markLines: [{ value: 20, label: '20', color: '#10b981' }, { value: 30, label: '30', color: '#ef4444' }] }));
     const s = initChart('sp500Mini');
     if (s && d.sp500) s.setOption(lineChartOption(d.labels, d.sp500, COLORS.green, { dataZoom: true }));
 });
@@ -237,12 +237,12 @@ fetch('/api/top-worst-picks?n=3&days=365').then(r=>r.json()).then(d => {
     const labels = [...d.top.map(x=>x.ticker), ...d.worst.map(x=>x.ticker)];
     const values = [...d.top.map(x=>x.return), ...d.worst.map(x=>x.return)];
     const colors = values.map(v => v > 0 ? COLORS.green : COLORS.red);
-    c.setOption(barChartOption(labels, values, colors, { horizontal: true }));
+    c.setOption(barChartOption(labels, values, colors, { horizontal: true, unit: '%', decimals: 1 }));
 });
 
 fetch('/api/win-rates?days=365').then(r=>r.json()).then(d => {
     const c = initChart('winRateMini');
-    if (c) c.setOption(barChartOption(['1일','5일','10일','20일'], [d['1d']||0, d['5d']||0, d['10d']||0, d['20d']||0], [COLORS.cyan, COLORS.blue, COLORS.primary, COLORS.purple], { yMax: 100 }));
+    if (c) c.setOption(barChartOption(['1일','5일','10일','20일'], [d['1d']||0, d['5d']||0, d['10d']||0, d['20d']||0], [COLORS.cyan, COLORS.blue, COLORS.primary, COLORS.purple], { yMax: 100, unit: '%', decimals: 0 }));
 });
 
 {% if recommendations %}
@@ -251,22 +251,23 @@ const avg = (k) => +(recs.reduce((s,r)=>s+r[k],0)/recs.length).toFixed(1);
 const rc = initChart('avgRadar');
 if (rc) rc.setOption(radarChartOption(['기술','기본','수급','외부','모멘텀'], [avg('technical_score'), avg('fundamental_score'), avg('smart_money_score'), avg('external_score'), avg('momentum_score')], COLORS.primary));
 
-// 스파크라인 로드
-{% for rec in recommendations %}
-fetch('/api/sparkline/{{ rec.ticker }}?days=5').then(r=>r.json()).then(d => {
-    if (!d.prices.length) return;
-    const el = document.getElementById('spark-{{ rec.ticker }}');
-    if (!el) return;
-    const chart = echarts.init(el);
-    const color = d.prices[d.prices.length-1] >= d.prices[0] ? '#10b981' : '#ef4444';
-    chart.setOption({
-        grid: {top:0,right:0,bottom:0,left:0},
-        xAxis: {show:false, type:'category', data: d.prices.map((_,i)=>i)},
-        yAxis: {show:false, type:'value', min:'dataMin', max:'dataMax'},
-        series: [{type:'line', data:d.prices, smooth:true, showSymbol:false, lineStyle:{width:1.5,color:color}, areaStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,colorStops:[{offset:0,color:color+'40'},{offset:1,color:color+'05'}]}}}]
-    });
-});
-{% endfor %}
+// 배치 스파크라인 로드 (단일 요청)
+const tickers = recs.map(r => r.ticker).join(',');
+fetch('/api/sparklines?tickers=' + encodeURIComponent(tickers) + '&days=5').then(r=>r.json()).then(data => {
+    for (const [ticker, prices] of Object.entries(data)) {
+        if (!prices || !prices.length) continue;
+        const el = document.getElementById('spark-' + ticker);
+        if (!el) continue;
+        const chart = echarts.init(el);
+        const color = prices[prices.length-1] >= prices[0] ? '#10b981' : '#ef4444';
+        chart.setOption({
+            grid: {top:0,right:0,bottom:0,left:0},
+            xAxis: {show:false, type:'category', data: prices.map((_,i)=>i)},
+            yAxis: {show:false, type:'value', min:'dataMin', max:'dataMax'},
+            series: [{type:'line', data:prices, smooth:true, showSymbol:false, lineStyle:{width:1.5,color:color}, areaStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,colorStops:[{offset:0,color:colorWithAlpha(color,0.25)},{offset:1,color:colorWithAlpha(color,0.02)}]}}}]
+        });
+    }
+}).catch(e => console.error('sparkline batch error:', e));
 {% endif %}
 </script>
 {% endblock %}

@@ -1,9 +1,59 @@
-/* Investmate — Tailwind 보조 스타일 (최소) */
+/* Investmate — Tailwind 보조 스타일 */
 
 /* 링크 기본 스타일 제거 */
 a { text-decoration: none; color: inherit; }
 
-/* tooltip (PER/PBR/ROE 설명) */
+/* ─── 반응형 차트 높이 ─────────────────────────────────────── */
+.chart-sm { height: 180px; }
+.chart-md { height: 240px; }
+.chart-lg { height: 320px; }
+.chart-xl { height: 380px; }
+
+@media (min-width: 768px) {
+    .chart-sm { height: 220px; }
+    .chart-md { height: 280px; }
+    .chart-lg { height: 380px; }
+    .chart-xl { height: 480px; }
+}
+
+@media (min-width: 1280px) {
+    .chart-sm { height: 240px; }
+    .chart-md { height: 300px; }
+    .chart-lg { height: 420px; }
+    .chart-xl { height: 520px; }
+}
+
+/* ─── 차트 스켈레톤 로딩 ───────────────────────────────────── */
+.chart-skeleton {
+    position: relative;
+    overflow: hidden;
+    background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 0.5rem;
+}
+.dark .chart-skeleton {
+    background: linear-gradient(90deg, #1e293b 25%, #334155 50%, #1e293b 75%);
+    background-size: 200% 100%;
+}
+@keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
+/* ─── 차트 빈 상태 ─────────────────────────────────────────── */
+.chart-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem 1rem;
+    color: #94a3b8;
+}
+.chart-empty-icon { font-size: 2rem; margin-bottom: 0.5rem; opacity: 0.5; }
+.chart-empty-text { font-size: 0.75rem; text-align: center; line-height: 1.5; }
+
+/* ─── Tooltip (PER/PBR/ROE 설명) ──────────────────────────── */
 .tooltip-icon {
     display: inline-flex; align-items: center; justify-content: center;
     width: 15px; height: 15px; border-radius: 50%;
@@ -11,27 +61,41 @@ a { text-decoration: none; color: inherit; }
     font-size: 9px; font-weight: 700; cursor: help;
     position: relative; vertical-align: middle; margin-left: 3px;
 }
-.tooltip-icon:hover::after {
+/* hover + focus (키보드 접근성) */
+.tooltip-icon:hover::after,
+.tooltip-icon:focus::after {
     content: attr(data-tooltip);
-    position: absolute; bottom: 130%; left: 50%; transform: translateX(-50%);
-    background: rgba(15,23,42,0.95); color: #fff;
+    position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+    background: rgba(15,23,42,0.95); color: #f1f5f9;
     padding: 8px 12px; border-radius: 8px;
     font-size: 11px; font-weight: 400; line-height: 1.5;
-    white-space: normal; width: 220px; text-align: left;
+    white-space: normal;
+    width: min(220px, calc(100vw - 40px));
+    text-align: left;
     z-index: 100; box-shadow: 0 4px 12px rgba(0,0,0,0.2);
     pointer-events: none;
 }
-.tooltip-icon:hover::before {
+.tooltip-icon:hover::before,
+.tooltip-icon:focus::before {
     content: '';
-    position: absolute; bottom: 120%; left: 50%; transform: translateX(-50%);
+    position: absolute; bottom: calc(100% + 2px); left: 50%; transform: translateX(-50%);
     border: 6px solid transparent; border-top-color: rgba(15,23,42,0.95);
     z-index: 100;
 }
 
 /* 다크모드 tooltip */
 .dark .tooltip-icon { background: #334155; color: #64748b; }
+.dark .tooltip-icon:hover::after,
+.dark .tooltip-icon:focus::after {
+    background: rgba(30,41,59,0.98); color: #e2e8f0;
+    border: 1px solid rgba(99,102,241,0.3);
+}
+.dark .tooltip-icon:hover::before,
+.dark .tooltip-icon:focus::before {
+    border-top-color: rgba(30,41,59,0.98);
+}
 
-/* 텍스트 줄임 유틸리티 */
+/* ─── 텍스트 줄임 유틸리티 ─────────────────────────────────── */
 .line-clamp-2 {
     display: -webkit-box;
     -webkit-line-clamp: 2;
