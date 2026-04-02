@@ -187,6 +187,7 @@ def screen_and_rank(
         return []
 
     # 시장 레짐 감지 → 적응형 가중치 적용
+    regime = None
     try:
         from src.analysis.regime import REGIME_WEIGHTS, detect_regime
         regime = detect_regime(session)
@@ -204,6 +205,25 @@ def screen_and_rank(
             "external": WEIGHT_EXTERNAL,
             "momentum": WEIGHT_MOMENTUM,
         }
+
+    # adaptive 모드: AI 피드백 기반 가중치 자동 최적화 (Phase 5)
+    if scoring_mode == "adaptive":
+        try:
+            from src.ai.scoring_advisor import compute_adaptive_weights
+            regime_name = regime.regime if regime else "range"
+            adaptive = compute_adaptive_weights(session, regime=regime_name)
+            if adaptive is not None:
+                weights = adaptive.to_dict()
+                logger.info(
+                    "적응형 AI 가중치 적용: %s (samples=%d, quality=%.2f)",
+                    weights, adaptive.sample_size, adaptive.correlation_quality,
+                )
+            else:
+                logger.info("적응형 가중치: 데이터 부족, 레짐 가중치 폴백")
+                scoring_mode = "legacy"
+        except Exception as e:
+            logger.warning("적응형 가중치 실패, legacy 폴백: %s", e)
+            scoring_mode = "legacy"
 
     # 현재 VIX 조회 (적응형 모멘텀용)
     current_vix: float | None = None

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -242,15 +243,70 @@ def _half_kelly(
     }
 
 
+def sigmoid_tilt(confidence: int) -> float:
+    """S-커브 비선형 신뢰도 틸트 (1-10 -> 0.3-1.8).
+
+    Logistic curve centered at 5.5, scaled to [0.3, 1.8].
+    confidence 5-6 부근에서 약 1.0 (중립), 극단에서 급격히 변화.
+    """
+    x = (confidence - 5.5) / 1.5
+    sig = 1.0 / (1.0 + math.exp(-x))
+    return round(0.3 + sig * 1.5, 4)
+
+
+def _get_tilt_factor(
+    confidence: int,
+    mode: str,
+    calibration_win_rates: dict[int, float] | None = None,
+) -> float:
+    """틸트 모드에 따라 신뢰도 → 비중 배율을 반환한다.
+
+    Args:
+        confidence: AI 신뢰도 (1-10).
+        mode: "linear" | "sigmoid" | "calibrated".
+        calibration_win_rates: {신뢰도: 실제 승률%} (calibrated 모드용).
+
+    Returns:
+        비중 배율 (1.0 = 중립).
+    """
+    if mode == "linear":
+        return confidence / 5.0
+
+    if mode == "calibrated" and calibration_win_rates:
+        win_rate = calibration_win_rates.get(confidence)
+        if win_rate is not None:
+            return win_rate / 50.0  # 50% = 중립(1.0)
+        # calibration 데이터 없는 신뢰도 → sigmoid fallback
+        return sigmoid_tilt(confidence)
+
+    # 기본값: sigmoid
+    return sigmoid_tilt(confidence)
+
+
 def _apply_confidence_tilt(
     weights: dict[str, float],
     inputs: list[PositionSizingInput],
+    tilt_mode: str | None = None,
+    calibration_win_rates: dict[int, float] | None = None,
 ) -> dict[str, float]:
     """AI 신뢰도 기반 비중 틸트.
 
     confidence=5이면 중립, >5이면 비중 상향, <5이면 하향.
     신뢰도가 None이면 중립(5)으로 처리.
+
+    Args:
+        weights: ticker -> 비중.
+        inputs: 종목별 사이징 입력.
+        tilt_mode: "linear" | "sigmoid" | "calibrated" (None이면 설정에서 읽음).
+        calibration_win_rates: {신뢰도: 실제 승률%} (calibrated 모드용).
     """
+    if tilt_mode is None:
+        try:
+            from src.config import get_settings
+            tilt_mode = get_settings().sizing_tilt_mode
+        except Exception:
+            tilt_mode = "sigmoid"
+
     confidence_map = {
         inp.ticker: max(1, min(10, inp.ai_confidence if inp.ai_confidence is not None else 5))
         for inp in inputs
@@ -259,7 +315,7 @@ def _apply_confidence_tilt(
     tilted = {}
     for ticker, w in weights.items():
         conf = confidence_map.get(ticker, 5)
-        tilt_factor = conf / 5.0  # 5=중립(1.0), 10=2.0배, 1=0.2배
+        tilt_factor = _get_tilt_factor(conf, tilt_mode, calibration_win_rates)
         tilted[ticker] = w * tilt_factor
 
     # 합계 정규화 (원래 총 노출도 유지)

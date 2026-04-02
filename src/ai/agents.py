@@ -36,6 +36,38 @@ class AgentResponse:
 
 
 # ---------------------------------------------------------------------------
+# 공통 제약 컨텍스트 빌더
+# ---------------------------------------------------------------------------
+
+
+def _build_constraint_context(constraints: object | None) -> str:
+    """ConstraintRules에서 Bull/Bear 에이전트에 주입할 컨텍스트를 생성한다."""
+    if constraints is None:
+        return ""
+
+    parts: list[str] = ["\n\n<context>"]
+
+    blocked = getattr(constraints, "blocked_sectors", ())
+    if blocked:
+        parts.append(f"차단 섹터 (과거 승률 40% 미만): {', '.join(blocked)}")
+
+    cal_table = getattr(constraints, "calibration_table", {})
+    if cal_table:
+        parts.append("과거 신뢰도별 실제 승률:")
+        for k, v in sorted(cal_table.items()):
+            parts.append(f"  신뢰도 {k}: {v}%")
+
+    commands = getattr(constraints, "feedback_commands", ())
+    if commands:
+        parts.append("피드백 규칙:")
+        for cmd in commands[:5]:
+            parts.append(f"  - {cmd}")
+
+    parts.append("</context>")
+    return "\n".join(parts) if len(parts) > 2 else ""
+
+
+# ---------------------------------------------------------------------------
 # 페르소나 생성
 # ---------------------------------------------------------------------------
 
@@ -62,6 +94,7 @@ def get_bull_persona(
         "- 예시: 'RSI 35에서 반등 중, 3분기 연속 EPS 상회(+12%/+8%/+15%)'\n"
         "- JSON 형식으로 응답하라\n"
     )
+    system += _build_constraint_context(constraints)
     return AgentPersona(
         role="bull",
         system_prompt=system,
@@ -91,6 +124,7 @@ def get_bear_persona(
         "- 예시: 'PER 32x (섹터 평균 22x 대비 45% 프리미엄), 내부자 3건 매도'\n"
         "- JSON 형식으로 응답하라\n"
     )
+    system += _build_constraint_context(constraints)
     return AgentPersona(
         role="bear",
         system_prompt=system,

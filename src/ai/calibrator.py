@@ -151,6 +151,7 @@ class CalibrationCell:
     sample_count: int
     win_rate: float
     avg_return: float
+    horizon: str = "20d"
 
 
 def _confidence_to_range(confidence: int) -> str:
@@ -188,20 +189,32 @@ def _estimate_regime_from_macro(session: Session, date_id: int) -> str:
 def build_condition_calibration(
     session: Session,
     cutoff_date_id: int,
+    horizons: list[str] | None = None,
 ) -> list[CalibrationCell]:
     """피드백 데이터를 조건별로 집계하여 캘리브레이션 셀을 생성/갱신한다.
 
     Args:
         cutoff_date_id: 이 날짜 이전 추천만 사용 (look-ahead 보호).
+        horizons: 캘리브레이션할 호라이즌 목록 (예: ["5d", "20d"]). None이면 ["20d"].
 
     Returns:
         생성된 CalibrationCell 리스트.
     """
+    if horizons is None:
+        horizons = ["20d"]
+
+    # 호라이즌별 return 필드 매핑
+    horizon_fields = {
+        "5d": "return_5d",
+        "10d": "return_10d",
+        "20d": "return_20d",
+        "60d": "return_60d",
+    }
+
     stmt = (
         select(FactAIFeedback)
         .where(
-            FactAIFeedback.ai_approved == True,
-            FactAIFeedback.return_20d.isnot(None),
+            FactAIFeedback.ai_approved == True,  # noqa: E712
             FactAIFeedback.ai_confidence.isnot(None),
             FactAIFeedback.run_date_id <= cutoff_date_id,
         )
@@ -214,62 +227,44 @@ def build_condition_calibration(
     # 매크로 캐시: date_id → regime
     regime_cache: dict[int, str] = {}
 
-    # 셀 집계: (regime, sector, conf_range, has_event) → [return_20d, ...]
-    cells: dict[tuple[str, str, str, bool], list[float]] = {}
-
-    for fb in feedbacks:
-        date_id = fb.run_date_id
-
-        if date_id not in regime_cache:
-            regime_cache[date_id] = _estimate_regime_from_macro(session, date_id)
-
-        regime = regime_cache[date_id]
-        sector = fb.sector or "Unknown"
-        conf_range = _confidence_to_range(int(fb.ai_confidence))
-        # 이벤트 여부: 단순 근사 (향후 확장 가능)
-        has_event = False
-
-        key = (regime, sector, conf_range, has_event)
-        cells.setdefault(key, []).append(float(fb.return_20d))
-
-    # DB 갱신
     result_cells: list[CalibrationCell] = []
 
-    for (regime, sector, conf_range, has_event), returns in cells.items():
-        if len(returns) < MIN_CELL_SAMPLES:
+    for horizon in horizons:
+        field_name = horizon_fields.get(horizon, "return_20d")
+
+        # 해당 호라이즌의 return이 있는 피드백만 필터
+        valid_fbs = [
+            fb for fb in feedbacks
+            if getattr(fb, field_name, None) is not None
+        ]
+        if not valid_fbs:
             continue
 
-        win_count = sum(1 for r in returns if r > 0)
-        win_rate = round(win_count / len(returns) * 100, 1)
-        avg_ret = round(sum(returns) / len(returns), 2)
+        # 셀 집계: (regime, sector, conf_range, has_event) → [return, ...]
+        cells: dict[tuple[str, str, str, bool], list[float]] = {}
 
-        cell = CalibrationCell(
-            regime=regime,
-            sector=sector,
-            confidence_range=conf_range,
-            has_event=has_event,
-            sample_count=len(returns),
-            win_rate=win_rate,
-            avg_return=avg_ret,
-        )
-        result_cells.append(cell)
+        for fb in valid_fbs:
+            date_id = fb.run_date_id
+            if date_id not in regime_cache:
+                regime_cache[date_id] = _estimate_regime_from_macro(session, date_id)
 
-        # UPSERT
-        existing = session.scalar(
-            select(FactCalibrationCell).where(
-                FactCalibrationCell.regime == regime,
-                FactCalibrationCell.sector == sector,
-                FactCalibrationCell.confidence_range == conf_range,
-                FactCalibrationCell.has_event == has_event,
-            )
-        )
-        if existing:
-            existing.sample_count = len(returns)
-            existing.win_rate = win_rate
-            existing.avg_return = avg_ret
-            existing.last_updated_id = cutoff_date_id
-        else:
-            session.add(FactCalibrationCell(
+            regime = regime_cache[date_id]
+            sector = fb.sector or "Unknown"
+            conf_range = _confidence_to_range(int(fb.ai_confidence))
+            has_event = False
+
+            key = (regime, sector, conf_range, has_event)
+            cells.setdefault(key, []).append(float(getattr(fb, field_name)))
+
+        for (regime, sector, conf_range, has_event), returns in cells.items():
+            if len(returns) < MIN_CELL_SAMPLES:
+                continue
+
+            win_count = sum(1 for r in returns if r > 0)
+            win_rate = round(win_count / len(returns) * 100, 1)
+            avg_ret = round(sum(returns) / len(returns), 2)
+
+            cell = CalibrationCell(
                 regime=regime,
                 sector=sector,
                 confidence_range=conf_range,
@@ -277,11 +272,40 @@ def build_condition_calibration(
                 sample_count=len(returns),
                 win_rate=win_rate,
                 avg_return=avg_ret,
-                last_updated_id=cutoff_date_id,
-            ))
+                horizon=horizon,
+            )
+            result_cells.append(cell)
+
+            # UPSERT
+            existing = session.scalar(
+                select(FactCalibrationCell).where(
+                    FactCalibrationCell.regime == regime,
+                    FactCalibrationCell.sector == sector,
+                    FactCalibrationCell.confidence_range == conf_range,
+                    FactCalibrationCell.has_event == has_event,
+                    FactCalibrationCell.horizon == horizon,
+                )
+            )
+            if existing:
+                existing.sample_count = len(returns)
+                existing.win_rate = win_rate
+                existing.avg_return = avg_ret
+                existing.last_updated_id = cutoff_date_id
+            else:
+                session.add(FactCalibrationCell(
+                    regime=regime,
+                    sector=sector,
+                    confidence_range=conf_range,
+                    has_event=has_event,
+                    horizon=horizon,
+                    sample_count=len(returns),
+                    win_rate=win_rate,
+                    avg_return=avg_ret,
+                    last_updated_id=cutoff_date_id,
+                ))
 
     session.commit()
-    logger.info("조건별 캘리브레이션 %d셀 갱신", len(result_cells))
+    logger.info("조건별 캘리브레이션 %d셀 갱신 (호라이즌: %s)", len(result_cells), horizons)
     return result_cells
 
 
@@ -291,6 +315,7 @@ def get_condition_calibration(
     sector: str,
     confidence: int,
     has_event: bool = False,
+    horizon: str = "20d",
 ) -> float | None:
     """특정 조건의 실제 승률을 조회한다 (폴백 체인).
 
@@ -299,13 +324,13 @@ def get_condition_calibration(
     conf_range = _confidence_to_range(confidence)
 
     # 1단계: 정확 매칭
-    cell = _find_cell(session, regime, sector, conf_range, has_event)
+    cell = _find_cell(session, regime, sector, conf_range, has_event, horizon)
     if cell and cell.sample_count >= MIN_CELL_SAMPLES:
         return float(cell.win_rate)
 
     # 2단계: 이벤트 무시
     for evt in [True, False]:
-        cell = _find_cell(session, regime, sector, conf_range, evt)
+        cell = _find_cell(session, regime, sector, conf_range, evt, horizon)
         if cell and cell.sample_count >= MIN_CELL_SAMPLES:
             return float(cell.win_rate)
 
@@ -318,6 +343,7 @@ def get_condition_calibration(
         .where(
             FactCalibrationCell.regime == regime,
             FactCalibrationCell.confidence_range == conf_range,
+            FactCalibrationCell.horizon == horizon,
             FactCalibrationCell.sample_count >= MIN_CELL_SAMPLES,
         )
     )
@@ -333,6 +359,7 @@ def get_condition_calibration(
         )
         .where(
             FactCalibrationCell.confidence_range == conf_range,
+            FactCalibrationCell.horizon == horizon,
             FactCalibrationCell.sample_count >= MIN_CELL_SAMPLES,
         )
     )
@@ -349,6 +376,7 @@ def _find_cell(
     sector: str,
     conf_range: str,
     has_event: bool,
+    horizon: str = "20d",
 ) -> FactCalibrationCell | None:
     """정확한 조건의 캘리브레이션 셀을 조회한다."""
     return session.scalar(
@@ -357,6 +385,7 @@ def _find_cell(
             FactCalibrationCell.sector == sector,
             FactCalibrationCell.confidence_range == conf_range,
             FactCalibrationCell.has_event == has_event,
+            FactCalibrationCell.horizon == horizon,
         )
     )
 
@@ -379,13 +408,14 @@ def format_calibration_for_prompt(
         return None
 
     lines: list[str] = []
-    lines.append("| 체제 | 섹터 | 신뢰도 | 샘플 | 승률 | 평균수익 |")
-    lines.append("|------|------|--------|------|------|----------|")
+    lines.append("| 체제 | 섹터 | 신뢰도 | 호라이즌 | 샘플 | 승률 | 평균수익 |")
+    lines.append("|------|------|--------|----------|------|------|----------|")
 
     for c in cells:
+        horizon = c.horizon if c.horizon else "20d"
         lines.append(
             f"| {c.regime} | {c.sector} | {c.confidence_range} "
-            f"| {c.sample_count} | {c.win_rate:.0f}% | {c.avg_return:+.1f}% |"
+            f"| {horizon} | {c.sample_count} | {c.win_rate:.0f}% | {c.avg_return:+.1f}% |"
         )
 
     return "\n".join(lines)

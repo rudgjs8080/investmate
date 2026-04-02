@@ -145,6 +145,17 @@ class Settings(BaseSettings):
     factor_size_weight: float = Field(
         default=0.10, alias="INVESTMATE_FACTOR_W_SIZE"
     )
+    # 반사실 분석
+    counterfactual_enabled: bool = Field(
+        default=True, alias="INVESTMATE_COUNTERFACTUAL_ENABLED"
+    )
+    # ML 드리프트 감지
+    ml_drift_threshold: float = Field(
+        default=0.10, alias="INVESTMATE_ML_DRIFT_THRESHOLD"
+    )
+    ml_auto_retrain: bool = Field(
+        default=True, alias="INVESTMATE_ML_AUTO_RETRAIN"
+    )
 
     model_config = {
         "env_file": ".env",

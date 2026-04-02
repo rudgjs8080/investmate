@@ -269,3 +269,50 @@ def _range_confidence(
         if lower <= sp500 <= upper:
             confidence += 0.15
     return min(1.0, confidence)
+
+
+def detect_regime_transition(
+    session: Session,
+    lookback: int = 5,
+) -> str | None:
+    """최근 N일간 레짐 변화를 감지한다.
+
+    Args:
+        session: DB 세션.
+        lookback: 과거 데이터 조회 수 (최소 2).
+
+    Returns:
+        "range→bull" 형식의 전환 문자열. 변화 없으면 None.
+    """
+    rows = (
+        session.execute(
+            select(FactMacroIndicator)
+            .order_by(FactMacroIndicator.date_id.desc())
+            .limit(max(2, lookback))
+        )
+        .scalars()
+        .all()
+    )
+
+    if len(rows) < 2:
+        return None
+
+    def _simple_classify(macro: FactMacroIndicator) -> str:
+        vix = float(macro.vix) if macro.vix is not None else 20.0
+        sp_close = float(macro.sp500_close) if macro.sp500_close is not None else 0.0
+        sp_sma20 = float(macro.sp500_sma20) if macro.sp500_sma20 is not None else 0.0
+        if vix > _VIX_CRISIS:
+            return "crisis"
+        if vix > _VIX_HIGH and sp_close < sp_sma20:
+            return "bear"
+        if vix < _VIX_LOW and sp_close > sp_sma20:
+            return "bull"
+        return "range"
+
+    current = _simple_classify(rows[0])
+    previous = _simple_classify(rows[-1])
+
+    if current != previous:
+        logger.info("레짐 전환 감지: %s → %s", previous, current)
+        return f"{previous}→{current}"
+    return None

@@ -736,13 +736,19 @@ class DailyPipeline:
         from src.reports.terminal import render_daily_report
         from src.reports.assembler import assemble_enriched_report
 
-        # AI 피드백 자동 수집 (과거 추천의 실제 결과)
+        # AI 피드백 자동 수집 (멀티 호라이즌, 시간 감쇠 가중치 포함)
         try:
-            from src.ai.feedback import collect_ai_feedback
+            from src.ai.feedback import collect_multi_horizon_feedback
+            from src.config import get_settings
+            settings = get_settings()
+            horizons = [int(h.strip()) for h in settings.feedback_horizons.split(",")]
+            halflife = settings.feedback_decay_halflife
             with get_session(self.engine) as session:
-                fb_count = collect_ai_feedback(session)
+                fb_count = collect_multi_horizon_feedback(
+                    session, horizons=horizons, halflife_days=halflife,
+                )
                 if fb_count:
-                    console.print(f"  [dim]AI 피드백 {fb_count}건 수집[/dim]")
+                    console.print(f"  [dim]AI 피드백 {fb_count}건 수집 (호라이즌: {horizons})[/dim]")
         except Exception as e:
             logger.debug("AI 피드백 수집 스킵: %s", e)
 
@@ -756,7 +762,8 @@ class DailyPipeline:
                 expired = expire_old_lessons(session, self.target_date)
                 eff_updated = update_lesson_effectiveness(session, self.target_date)
                 cutoff_id = _d2i(self.target_date - timedelta(days=35))
-                cal_cells = build_condition_calibration(session, cutoff_id)
+                cal_horizons = ["5d", "10d", "20d", "60d"]
+                cal_cells = build_condition_calibration(session, cutoff_id, horizons=cal_horizons)
                 parts: list[str] = []
                 if expired:
                     parts.append(f"만료 {expired}건")

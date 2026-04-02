@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass
 from datetime import date
 
@@ -36,6 +37,9 @@ class AIPerformanceSummary:
     sector_accuracy: dict[str, float] | None = None  # 섹터별 승률
     confidence_calibration: dict[int, float] | None = None  # 신뢰도별 실제 승률
     overestimate_rate: float | None = None  # 목표가 과대추정 비율
+    # 멀티 호라이즌 (Phase 1)
+    horizon_win_rates: dict[str, float] | None = None  # 호라이즌별 승률
+    weighted_win_rate_approved: float | None = None  # 시간 감쇠 가중 승률
 
 
 def collect_ai_feedback(session: Session, days_back: int = 90) -> int:
@@ -129,6 +133,194 @@ def collect_ai_feedback(session: Session, days_back: int = 90) -> int:
     return count
 
 
+def compute_feedback_weight(
+    rec_date: date,
+    eval_date: date,
+    halflife_days: int = 30,
+) -> float:
+    """시간 감쇠 가중치를 계산한다 (지수 감쇠).
+
+    Args:
+        rec_date: 추천 날짜.
+        eval_date: 평가 기준 날짜 (보통 오늘).
+        halflife_days: 반감기 (일).
+
+    Returns:
+        0.0 ~ 1.0 사이 가중치.
+    """
+    days_elapsed = (eval_date - rec_date).days
+    if days_elapsed <= 0:
+        return 1.0
+    decay = math.exp(-math.log(2) * days_elapsed / halflife_days)
+    return round(max(0.0, decay), 6)
+
+
+def collect_multi_horizon_feedback(
+    session: Session,
+    horizons: list[int] | None = None,
+    halflife_days: int = 30,
+) -> int:
+    """멀티 호라이즌 AI 피드백을 수집한다 (5d/10d/20d/60d).
+
+    기존 collect_ai_feedback()의 확장 버전. 여러 수평선의 수익률과
+    방향 정확도를 동시에 수집하고, 시간 감쇠 가중치를 부여한다.
+
+    Args:
+        horizons: 평가할 호라이즌 목록 (일). 기본 [5, 10, 20, 60].
+        halflife_days: 시간 감쇠 반감기 (일).
+
+    Returns:
+        업데이트된 피드백 수.
+    """
+    from src.db.helpers import id_to_date
+
+    if horizons is None:
+        horizons = [5, 10, 20, 60]
+
+    eval_date = date.today()
+
+    existing_feedback = set(
+        session.execute(select(FactAIFeedback.recommendation_id)).scalars().all()
+    )
+
+    recs = session.execute(
+        select(FactDailyRecommendation)
+        .where(FactDailyRecommendation.ai_approved.isnot(None))
+    ).scalars().all()
+
+    # 호라이즌별 필드 매핑 (FactDailyRecommendation → FactAIFeedback)
+    horizon_return_fields = {5: "return_5d", 10: "return_10d", 20: "return_20d"}
+
+    count = 0
+    for rec in recs:
+        if rec.recommendation_id in existing_feedback:
+            continue
+
+        # 최소한 20d 수익률이 있어야 수집
+        if rec.return_20d is None:
+            continue
+
+        stock = session.execute(
+            select(DimStock).where(DimStock.stock_id == rec.stock_id)
+        ).scalar_one_or_none()
+        if not stock:
+            continue
+
+        price_at = float(rec.price_at_recommendation) if rec.price_at_recommendation else None
+        if not price_at:
+            continue
+
+        # 호라이즌별 수익률 수집
+        returns: dict[int, float | None] = {}
+        for h in horizons:
+            field = horizon_return_fields.get(h)
+            if field and hasattr(rec, field):
+                val = getattr(rec, field)
+                returns[h] = float(val) if val is not None else None
+            else:
+                # 60d 등은 가격 데이터에서 직접 계산
+                returns[h] = _compute_return_from_prices(
+                    session, rec.stock_id, rec.run_date_id, h, price_at,
+                )
+
+        # 기본 20d return은 반드시 채움
+        return_20d = returns.get(20, float(rec.return_20d) if rec.return_20d is not None else None)
+        actual_20d = price_at * (1 + return_20d / 100) if return_20d is not None else None
+
+        # 방향 정확도 (호라이즌별)
+        def _direction_correct(approved: bool | None, ret: float | None) -> bool | None:
+            if approved is None or ret is None:
+                return None
+            return (ret > 0) if approved else (ret <= 0)
+
+        # 목표가/손절 평가
+        target_hit = None
+        target_error = None
+        if rec.ai_target_price and actual_20d and price_at:
+            target_hit = actual_20d >= float(rec.ai_target_price)
+            target_error = round(
+                (float(rec.ai_target_price) - actual_20d) / price_at * 100, 2
+            )
+
+        stop_hit = None
+        if rec.ai_stop_loss and return_20d is not None and price_at:
+            min_price_approx = price_at * (1 + min(0, return_20d) / 100)
+            stop_hit = min_price_approx <= float(rec.ai_stop_loss)
+
+        # 시간 감쇠 가중치
+        try:
+            rec_date = id_to_date(rec.run_date_id)
+        except Exception:
+            rec_date = eval_date
+        weight = compute_feedback_weight(rec_date, eval_date, halflife_days)
+
+        feedback = FactAIFeedback(
+            recommendation_id=rec.recommendation_id,
+            run_date_id=rec.run_date_id,
+            stock_id=rec.stock_id,
+            ticker=stock.ticker,
+            sector=stock.sector.sector_name if stock.sector else None,
+            ai_approved=rec.ai_approved,
+            ai_confidence=int(rec.ai_confidence) if rec.ai_confidence is not None else None,
+            ai_target_price=float(rec.ai_target_price) if rec.ai_target_price else None,
+            ai_stop_loss=float(rec.ai_stop_loss) if rec.ai_stop_loss else None,
+            price_at_rec=price_at,
+            actual_price_20d=actual_20d,
+            return_5d=returns.get(5),
+            return_10d=returns.get(10),
+            return_20d=return_20d,
+            return_60d=returns.get(60),
+            direction_correct=_direction_correct(rec.ai_approved, return_20d),
+            direction_correct_5d=_direction_correct(rec.ai_approved, returns.get(5)),
+            direction_correct_10d=_direction_correct(rec.ai_approved, returns.get(10)),
+            direction_correct_60d=_direction_correct(rec.ai_approved, returns.get(60)),
+            target_hit=target_hit,
+            stop_hit=stop_hit,
+            target_error_pct=target_error,
+            feedback_weight=weight,
+        )
+        session.add(feedback)
+        count += 1
+
+    if count:
+        session.flush()
+    logger.info("멀티 호라이즌 AI 피드백 수집: %d건", count)
+    return count
+
+
+def _compute_return_from_prices(
+    session: Session,
+    stock_id: int,
+    run_date_id: int,
+    horizon_days: int,
+    price_at_rec: float,
+) -> float | None:
+    """가격 데이터에서 N일 후 수익률을 직접 계산한다."""
+    from src.db.helpers import id_to_date
+
+    try:
+        rec_date = id_to_date(run_date_id)
+    except Exception:
+        return None
+
+    # 거래일 기준 N일 후의 가격 찾기 (날짜순으로 N번째)
+    prices = session.execute(
+        select(FactDailyPrice.close)
+        .where(
+            FactDailyPrice.stock_id == stock_id,
+            FactDailyPrice.date_id > run_date_id,
+        )
+        .order_by(FactDailyPrice.date_id.asc())
+        .limit(horizon_days)
+    ).scalars().all()
+
+    if len(prices) < horizon_days:
+        return None
+
+    future_price = float(prices[-1])
+    return round((future_price - price_at_rec) / price_at_rec * 100, 2)
+
+
 def calculate_ai_performance(session: Session, days_back: int = 90) -> AIPerformanceSummary:
     """AI 성과를 분석한다.
 
@@ -185,6 +377,27 @@ def calculate_ai_performance(session: Session, days_back: int = 90) -> AIPerform
         for c, rets in conf_data.items() if rets
     } or None
 
+    # 멀티 호라이즌 승률
+    horizon_win_rates: dict[str, float] = {}
+    for label, field in [("5d", "return_5d"), ("10d", "return_10d"), ("20d", "return_20d"), ("60d", "return_60d")]:
+        items = [f for f in approved if getattr(f, field, None) is not None]
+        if items:
+            wins = sum(1 for f in items if float(getattr(f, field)) > 0)
+            horizon_win_rates[label] = round(wins / len(items) * 100, 1)
+
+    # 시간 감쇠 가중 승률
+    weighted_win = None
+    weighted_items = [f for f in approved if f.return_20d is not None and f.feedback_weight is not None]
+    if weighted_items:
+        total_weight = sum(float(f.feedback_weight) for f in weighted_items)
+        if total_weight > 0:
+            w_wins = sum(
+                float(f.feedback_weight)
+                for f in weighted_items
+                if float(f.return_20d) > 0
+            )
+            weighted_win = round(w_wins / total_weight * 100, 1)
+
     return AIPerformanceSummary(
         total_predictions=len(feedbacks),
         ai_approved_count=len(approved),
@@ -198,6 +411,8 @@ def calculate_ai_performance(session: Session, days_back: int = 90) -> AIPerform
         sector_accuracy=sector_accuracy,
         confidence_calibration=conf_calibration,
         overestimate_rate=overestimate,
+        horizon_win_rates=horizon_win_rates or None,
+        weighted_win_rate_approved=weighted_win,
     )
 
 
@@ -304,7 +519,7 @@ def generate_constraint_rules(
         if entry["count"] >= 3:
             cal_table[level] = round(entry["actual"] * 100, 1)
 
-    # 5. 피드백 기반 페널티
+    # 5. 피드백 기반 점진적 패널티 (Phase 1 개선)
     penalty = 0
     default_action = "neutral"
     if (
@@ -312,7 +527,8 @@ def generate_constraint_rules(
         and perf.avg_return_excluded is not None
         and perf.avg_return_approved < perf.avg_return_excluded
     ):
-        penalty = 2
+        gap = perf.avg_return_excluded - perf.avg_return_approved
+        penalty = min(4, max(0, int(2 * gap / 5)))
         default_action = "exclude"
 
     # 6. 명령형 피드백 문장 생성

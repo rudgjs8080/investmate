@@ -340,6 +340,7 @@ class FactDailyRecommendation(TimestampMixin, Base):
     return_5d: Mapped[float | None] = mapped_column(Numeric, nullable=True)
     return_10d: Mapped[float | None] = mapped_column(Numeric, nullable=True)
     return_20d: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    return_60d: Mapped[float | None] = mapped_column(Numeric, nullable=True)
     ai_approved: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=None)
     ai_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     ai_target_price: Mapped[float | None] = mapped_column(Numeric, nullable=True)
@@ -380,11 +381,18 @@ class FactAIFeedback(TimestampMixin, Base):
     price_at_rec: Mapped[float | None] = mapped_column(Numeric, nullable=True)
     actual_price_5d: Mapped[float | None] = mapped_column(Numeric, nullable=True)
     actual_price_20d: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    return_5d: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    return_10d: Mapped[float | None] = mapped_column(Numeric, nullable=True)
     return_20d: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    return_60d: Mapped[float | None] = mapped_column(Numeric, nullable=True)
     direction_correct: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    direction_correct_5d: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    direction_correct_10d: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    direction_correct_60d: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     target_hit: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     stop_hit: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     target_error_pct: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    feedback_weight: Mapped[float | None] = mapped_column(Numeric, nullable=True)
 
 
 class FactAILesson(TimestampMixin, Base):
@@ -443,13 +451,13 @@ class FactAIRetrospective(TimestampMixin, Base):
 
 
 class FactCalibrationCell(TimestampMixin, Base):
-    """조건별 캘리브레이션 셀 (regime x sector x confidence x event)."""
+    """조건별 캘리브레이션 셀 (regime x sector x confidence x event x horizon)."""
 
     __tablename__ = "fact_calibration_cells"
     __table_args__ = (
         UniqueConstraint(
-            "regime", "sector", "confidence_range", "has_event",
-            name="uq_calibration_cell",
+            "regime", "sector", "confidence_range", "has_event", "horizon",
+            name="uq_calibration_cell_v2",
         ),
     )
 
@@ -458,6 +466,7 @@ class FactCalibrationCell(TimestampMixin, Base):
     sector: Mapped[str] = mapped_column(String(100), nullable=False)
     confidence_range: Mapped[str] = mapped_column(String(10), nullable=False)
     has_event: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    horizon: Mapped[str] = mapped_column(String(5), nullable=False, default="20d")
     sample_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     win_rate: Mapped[float | None] = mapped_column(Numeric, nullable=True)
     avg_return: Mapped[float | None] = mapped_column(Numeric, nullable=True)
@@ -490,6 +499,88 @@ class FactAIDebate(TimestampMixin, Base):
     confidence: Mapped[int | None] = mapped_column(Integer, nullable=True)
     key_arguments: Mapped[list | None] = mapped_column(JSON, nullable=True)
     consensus_strength: Mapped[str | None] = mapped_column(String(10), nullable=True)
+
+
+class FactAgentAccuracy(TimestampMixin, Base):
+    """에이전트별(Bull/Bear) 예측 정확도 추적 테이블."""
+
+    __tablename__ = "fact_agent_accuracy"
+    __table_args__ = (
+        Index("idx_agent_acc_date", "run_date_id"),
+    )
+
+    accuracy_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_date_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("dim_date.date_id"), nullable=False
+    )
+    agent_role: Mapped[str] = mapped_column(String(12), nullable=False)
+    ticker: Mapped[str] = mapped_column(String(10), nullable=False)
+    predicted_direction: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    actual_return_20d: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    was_correct: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
+
+class FactCounterfactual(TimestampMixin, Base):
+    """반사실 시뮬레이션 결과."""
+
+    __tablename__ = "fact_counterfactuals"
+
+    counterfactual_id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True
+    )
+    run_date_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("dim_date.date_id"), nullable=False
+    )
+    recommendation_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey(
+            "fact_daily_recommendations.recommendation_id", ondelete="CASCADE"
+        ),
+        nullable=False,
+    )
+    ticker: Mapped[str] = mapped_column(String(10), nullable=False)
+    original_decision: Mapped[str] = mapped_column(String(10), nullable=False)
+    original_return: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    counterfactual_return: Mapped[float | None] = mapped_column(
+        Numeric, nullable=True
+    )
+    delta: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    lesson_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class FactMLModelLog(TimestampMixin, Base):
+    """ML 모델 학습 이력."""
+
+    __tablename__ = "fact_ml_model_log"
+
+    model_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    trained_date_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("dim_date.date_id"), nullable=False
+    )
+    model_type: Mapped[str] = mapped_column(
+        String(20), nullable=False
+    )  # "binary" | "regression"
+    train_auc: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    train_rmse: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    feature_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sample_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    file_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+class FactMLDriftCheck(TimestampMixin, Base):
+    """모델 드리프트 검사 이력."""
+
+    __tablename__ = "fact_ml_drift_check"
+
+    check_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    date_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("dim_date.date_id"), nullable=False
+    )
+    accuracy_current: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    accuracy_baseline: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    is_drifted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    action_taken: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
 
 class FactNews(TimestampMixin, Base):

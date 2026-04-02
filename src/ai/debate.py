@@ -334,6 +334,39 @@ def run_debate(
 
 
 # ---------------------------------------------------------------------------
+# 컨센서스 기반 신뢰도 보정
+# ---------------------------------------------------------------------------
+
+
+def apply_consensus_penalty(
+    parsed: list[dict],
+    consensus_strength: str,
+    penalty: int = 1,
+) -> list[dict]:
+    """합의 강도에 따라 신뢰도를 보정한다.
+
+    Args:
+        parsed: parse_ai_response 결과 (수정됨).
+        consensus_strength: "high" | "medium" | "low".
+        penalty: low consensus 시 차감할 신뢰도 점수.
+
+    Returns:
+        보정된 parsed 리스트.
+    """
+    if consensus_strength == "low" and penalty > 0:
+        for p in parsed:
+            if p.get("ai_confidence") is not None:
+                original = p["ai_confidence"]
+                p["ai_confidence"] = max(1, original - penalty)
+                if original != p["ai_confidence"]:
+                    logger.info(
+                        "%s 컨센서스 패널티: 신뢰도 %d → %d (합의 %s)",
+                        p.get("ticker"), original, p["ai_confidence"], consensus_strength,
+                    )
+    return parsed
+
+
+# ---------------------------------------------------------------------------
 # DB 저장
 # ---------------------------------------------------------------------------
 
