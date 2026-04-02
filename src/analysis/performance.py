@@ -3,15 +3,29 @@
 from __future__ import annotations
 
 import logging
+import statistics
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from src.analysis.risk_metrics import (
+    calculate_calmar,
+    calculate_max_drawdown,
+    calculate_omega,
+    calculate_sharpe,
+    calculate_sortino,
+)
 from src.config import get_settings
 from src.db.helpers import date_to_id, id_to_date
-from src.db.models import DimDate, DimStock, FactDailyPrice, FactDailyRecommendation
+from src.db.models import (
+    DimDate,
+    DimStock,
+    FactDailyPrice,
+    FactDailyRecommendation,
+    FactMacroIndicator,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +36,7 @@ class PerformanceReport:
 
     total_recommendations: int = 0
     with_return_data: int = 0
+    # 단순 평균
     win_rate_1d: float | None = None
     win_rate_5d: float | None = None
     win_rate_10d: float | None = None
@@ -30,6 +45,22 @@ class PerformanceReport:
     avg_return_5d: float | None = None
     avg_return_10d: float | None = None
     avg_return_20d: float | None = None
+    # 가중 평균 (position_weight 기반)
+    weighted_avg_return_1d: float | None = None
+    weighted_avg_return_5d: float | None = None
+    weighted_avg_return_10d: float | None = None
+    weighted_avg_return_20d: float | None = None
+    # 벤치마크 비교
+    benchmark_return_cumulative: float | None = None
+    excess_return_cumulative: float | None = None
+    information_ratio: float | None = None
+    # 리스크 조정 지표
+    sharpe_ratio: float | None = None
+    sortino_ratio: float | None = None
+    max_drawdown: float | None = None
+    calmar_ratio: float | None = None
+    omega_ratio: float | None = None
+    # 기존 필드
     best_pick: tuple[str, float, str] | None = None  # (ticker, return%, date)
     worst_pick: tuple[str, float, str] | None = None
     by_sector: dict[str, float] = field(default_factory=dict)
@@ -65,8 +96,8 @@ def calculate_performance(
     # 수익률 데이터가 있는 추천만
     with_data = [r for r in recs if r.return_1d is not None or r.return_20d is not None]
 
-    # 각 기간별 통계
-    stats = {}
+    # ── 각 기간별 통계 (단순 + 가중) ──
+    stats: dict[str, float | None] = {}
     for period, attr in [("1d", "return_1d"), ("5d", "return_5d"), ("10d", "return_10d"), ("20d", "return_20d")]:
         values = [float(getattr(r, attr)) for r in recs if getattr(r, attr) is not None]
         if values:
@@ -77,7 +108,54 @@ def calculate_performance(
             stats[f"win_rate_{period}"] = None
             stats[f"avg_return_{period}"] = None
 
-    # 종목 정보 배치 로드 (N+1 방지)
+        # 가중 평균 수익률 (position_weight 기반)
+        weighted_pairs = [
+            (float(getattr(r, attr)), float(r.position_weight))
+            for r in recs
+            if getattr(r, attr) is not None and r.position_weight is not None and float(r.position_weight) > 0
+        ]
+        if weighted_pairs:
+            total_w = sum(w for _, w in weighted_pairs)
+            stats[f"weighted_avg_return_{period}"] = round(
+                sum(ret * w for ret, w in weighted_pairs) / total_w, 2,
+            )
+        else:
+            stats[f"weighted_avg_return_{period}"] = None
+
+    # ── 일별 가중 포트폴리오 수익률 시계열 (리스크 지표 계산용) ──
+    daily_returns = _build_daily_portfolio_returns(recs)
+
+    risk_sharpe = None
+    risk_sortino = None
+    risk_mdd = None
+    risk_calmar = None
+    risk_omega = None
+
+    if len(daily_returns) >= 2:
+        risk_sharpe = calculate_sharpe(daily_returns, period_days=1)
+        risk_sortino = calculate_sortino(daily_returns, period_days=1)
+        risk_mdd = calculate_max_drawdown(daily_returns)
+        risk_calmar = calculate_calmar(daily_returns, risk_mdd, period_days=1)
+        risk_omega = calculate_omega(daily_returns)
+
+    # ── 벤치마크 비교 ──
+    bm_cumulative = None
+    excess_cumulative = None
+    ir = None
+    benchmark_data = _calculate_benchmark_returns(session, recs)
+    if benchmark_data and daily_returns:
+        bm_cumulative = benchmark_data["cumulative"]
+        portfolio_cum = sum(daily_returns)
+        excess_cumulative = round(portfolio_cum - bm_cumulative, 2)
+
+        excess_series = benchmark_data.get("excess_series", [])
+        if len(excess_series) >= 2:
+            mean_ex = statistics.mean(excess_series)
+            std_ex = statistics.stdev(excess_series)
+            if std_ex > 0:
+                ir = round(mean_ex / std_ex * (252 ** 0.5), 3)
+
+    # ── 종목 정보 배치 로드 (N+1 방지) ──
     all_stock_ids = {r.stock_id for r in recs}
     stock_map = {
         s.stock_id: s
@@ -86,9 +164,7 @@ def calculate_performance(
         ).scalars()
     } if all_stock_ids else {}
 
-    # 최고/최저 종목 (20일 기준, 없으면 5일)
-    best_pick = None
-    worst_pick = None
+    # ── 최고/최저 종목 ──
     scored = []
     for r in recs:
         ret = _best_return(r)
@@ -98,12 +174,14 @@ def calculate_performance(
             d = id_to_date(r.run_date_id).isoformat()
             scored.append((ticker, ret, d))
 
+    best_pick = None
+    worst_pick = None
     if scored:
         scored.sort(key=lambda x: x[1], reverse=True)
         best_pick = scored[0]
         worst_pick = scored[-1]
 
-    # 섹터별 평균 수익률 (fallback: 20d → 5d → 1d)
+    # ── 섹터별 평균 수익률 ──
     sector_returns: dict[str, list[float]] = {}
     for r in recs:
         ret = _best_return(r)
@@ -119,15 +197,14 @@ def calculate_performance(
         if v
     }
 
-    # AI 승인 종목 vs 전체 (fallback: 20d → 5d → 1d)
+    # ── AI 승인 vs 전체 ──
     ai_approved_returns = [_best_return(r) for r in recs if r.ai_approved is True and _best_return(r) is not None]
-    ai_rejected_returns = [_best_return(r) for r in recs if r.ai_approved is False and _best_return(r) is not None]
     all_returns = [_best_return(r) for r in recs if _best_return(r) is not None]
 
     ai_approved_avg = round(sum(ai_approved_returns) / len(ai_approved_returns), 2) if ai_approved_returns else None
     all_avg = round(sum(all_returns) / len(all_returns), 2) if all_returns else None
 
-    # 최근 30개 (종목명 포함)
+    # ── 최근 30개 ──
     recent = []
     for r in recs[:30]:
         stock = stock_map.get(r.stock_id)
@@ -143,6 +220,7 @@ def calculate_performance(
             "return_20d": float(r.return_20d) if r.return_20d is not None else None,
             "ai_approved": r.ai_approved,
             "ai_confidence": int(r.ai_confidence) if r.ai_confidence else None,
+            "position_weight": round(float(r.position_weight), 4) if r.position_weight else None,
         })
 
     return PerformanceReport(
@@ -156,6 +234,18 @@ def calculate_performance(
         avg_return_5d=stats["avg_return_5d"],
         avg_return_10d=stats["avg_return_10d"],
         avg_return_20d=stats["avg_return_20d"],
+        weighted_avg_return_1d=stats["weighted_avg_return_1d"],
+        weighted_avg_return_5d=stats["weighted_avg_return_5d"],
+        weighted_avg_return_10d=stats["weighted_avg_return_10d"],
+        weighted_avg_return_20d=stats["weighted_avg_return_20d"],
+        benchmark_return_cumulative=bm_cumulative,
+        excess_return_cumulative=excess_cumulative,
+        information_ratio=ir,
+        sharpe_ratio=risk_sharpe,
+        sortino_ratio=risk_sortino,
+        max_drawdown=risk_mdd,
+        calmar_ratio=risk_calmar,
+        omega_ratio=risk_omega,
         best_pick=best_pick,
         worst_pick=worst_pick,
         by_sector=by_sector,
@@ -172,6 +262,93 @@ def _best_return(rec: FactDailyRecommendation) -> float | None:
         if val is not None:
             return float(val)
     return None
+
+
+def _build_daily_portfolio_returns(recs: list[FactDailyRecommendation]) -> list[float]:
+    """추천을 run_date_id 기준으로 그룹핑 → 일별 가중 포트폴리오 수익률(1d) 시계열.
+
+    position_weight가 없으면 동일 가중 fallback.
+    return_1d가 없는 추천은 제외.
+    """
+    by_date: dict[int, list[tuple[float, float]]] = {}
+    for r in recs:
+        if r.return_1d is None:
+            continue
+        ret = float(r.return_1d)
+        w = float(r.position_weight) if r.position_weight is not None and float(r.position_weight) > 0 else None
+        by_date.setdefault(r.run_date_id, []).append((ret, w))
+
+    daily_rets: list[float] = []
+    for did in sorted(by_date):
+        pairs = by_date[did]
+        has_weights = all(w is not None for _, w in pairs)
+        if has_weights:
+            total_w = sum(w for _, w in pairs)
+            if total_w > 0:
+                daily_rets.append(sum(ret * w / total_w for ret, w in pairs))
+            else:
+                daily_rets.append(sum(ret for ret, _ in pairs) / len(pairs))
+        else:
+            daily_rets.append(sum(ret for ret, _ in pairs) / len(pairs))
+    return daily_rets
+
+
+def _calculate_benchmark_returns(
+    session: Session, recs: list[FactDailyRecommendation],
+) -> dict | None:
+    """추천 기간의 S&P 500 일별 수익률과 누적 수익률을 계산한다."""
+    if not recs:
+        return None
+
+    date_ids = sorted({r.run_date_id for r in recs})
+    if len(date_ids) < 2:
+        return None
+
+    min_did = min(date_ids) - 5  # 전일 종가 필요
+    max_did = max(date_ids) + 1
+
+    macros = session.execute(
+        select(FactMacroIndicator.date_id, FactMacroIndicator.sp500_close)
+        .where(
+            FactMacroIndicator.date_id >= min_did,
+            FactMacroIndicator.date_id <= max_did,
+            FactMacroIndicator.sp500_close.isnot(None),
+        )
+        .order_by(FactMacroIndicator.date_id)
+    ).all()
+
+    if len(macros) < 2:
+        return None
+
+    sp500_map = {did: float(close) for did, close in macros}
+    sorted_dids = sorted(sp500_map)
+
+    # 일별 S&P 500 수익률
+    sp500_daily: list[float] = []
+    for i in range(1, len(sorted_dids)):
+        prev = sp500_map[sorted_dids[i - 1]]
+        curr = sp500_map[sorted_dids[i]]
+        if prev > 0:
+            sp500_daily.append((curr / prev - 1) * 100)
+
+    if not sp500_daily:
+        return None
+
+    # 일별 포트폴리오 수익률 (date_ids 기준)
+    portfolio_daily = _build_daily_portfolio_returns(recs)
+
+    # 동일 기간 맞추기: 최소 공통 길이
+    min_len = min(len(sp500_daily), len(portfolio_daily))
+    sp500_aligned = sp500_daily[:min_len]
+    port_aligned = portfolio_daily[:min_len]
+
+    cumulative_sp = sum(sp500_aligned)
+    excess_series = [p - s for p, s in zip(port_aligned, sp500_aligned)]
+
+    return {
+        "cumulative": round(cumulative_sp, 2),
+        "excess_series": excess_series,
+    }
 
 
 # ──────────────────────────────────────────

@@ -15,6 +15,14 @@ from datetime import date
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from src.analysis.risk_metrics import (
+    calculate_calmar,
+    calculate_max_drawdown,
+    calculate_max_drawdown_days,
+    calculate_omega,
+    calculate_sharpe,
+    calculate_sortino,
+)
 from src.config import get_settings
 from src.db.helpers import date_to_id, id_to_date
 from src.db.models import DimStock, FactDailyRecommendation
@@ -188,15 +196,15 @@ class BacktestEngine:
         # 집계 — 20일 기간에 맞게 무위험 수익률을 스케일링
         # 연간 % → 20 거래일 기간 %
         rf_20d = settings.risk_free_rate_pct * (20 / 252)
-        sharpe = _calculate_sharpe(all_returns_20d, risk_free=rf_20d)
-        max_dd = _calculate_max_drawdown(all_returns_20d)
+        sharpe = calculate_sharpe(all_returns_20d, risk_free=rf_20d)
+        max_dd = calculate_max_drawdown(all_returns_20d)
 
         # 확장 지표 계산
-        sortino = _calculate_sortino(all_returns_20d, risk_free=rf_20d)
-        calmar = _calculate_calmar(all_returns_20d, max_dd)
-        omega = _calculate_omega(all_returns_20d)
+        sortino = calculate_sortino(all_returns_20d, risk_free=rf_20d)
+        calmar = calculate_calmar(all_returns_20d, max_dd)
+        omega = calculate_omega(all_returns_20d)
         monthly_wr = _calculate_monthly_win_rate(daily_results)
-        mdd_days = _calculate_max_drawdown_days(all_returns_20d)
+        mdd_days = calculate_max_drawdown_days(all_returns_20d)
 
         # 홀드아웃 분석
         holdout = None
@@ -241,86 +249,13 @@ def _win_rate(values: list[float]) -> float | None:
     return wins / len(values) * 100
 
 
-def _calculate_sharpe(returns: list[float], risk_free: float = 0.0) -> float | None:
-    """연환산 샤프 비율.
-
-    20일 기준 수익률을 연환산 (sqrt(252/20))하여 산업 표준과 비교 가능하게 함.
-    """
-    if len(returns) < 2:
-        return None
-    mean_r = statistics.mean(returns)
-    std_r = statistics.stdev(returns)
-    if std_r == 0:
-        return None
-    raw_sharpe = (mean_r - risk_free) / std_r
-    # 20일 주기 -> 연환산: sqrt(252/20) ~ 3.55
-    annualization_factor = math.sqrt(252 / 20)
-    return round(raw_sharpe * annualization_factor, 3)
-
-
-def _calculate_max_drawdown(returns: list[float]) -> float | None:
-    """누적 수익 기준 최대 낙폭."""
-    if not returns:
-        return None
-    cumulative = 0.0
-    peak = 0.0
-    max_dd = 0.0
-    for r in returns:
-        cumulative += r
-        if cumulative > peak:
-            peak = cumulative
-        dd = peak - cumulative
-        if dd > max_dd:
-            max_dd = dd
-    return max_dd
-
-
-def _calculate_sortino(returns: list[float], risk_free: float = 0.0) -> float | None:
-    """소르티노 비율 — (mean - rf) / downside_std.
-
-    하방 리스크만 고려하여 샤프보다 정교한 위험 조정 수익률을 제공한다.
-    """
-    if len(returns) < 2:
-        return None
-    mean_r = statistics.mean(returns)
-    downside = [r for r in returns if r < 0]
-    if len(downside) < 2:
-        # 음수 수익이 거의 없으면 소르티노 산출 불가
-        return None
-    downside_std = statistics.stdev(downside)
-    if downside_std == 0:
-        return None
-    raw = (mean_r - risk_free) / downside_std
-    annualization_factor = math.sqrt(252 / 20)
-    return round(raw * annualization_factor, 3)
-
-
-def _calculate_calmar(returns: list[float], max_dd: float | None) -> float | None:
-    """칼마 비율 — annual_return / max_drawdown.
-
-    수익 대비 최대 낙폭의 비율로 리스크 효율성을 측정한다.
-    """
-    if not returns or max_dd is None or max_dd == 0:
-        return None
-    mean_r = statistics.mean(returns)
-    # 20일 수익률을 연환산
-    annual_return = mean_r * (252 / 20)
-    return round(annual_return / max_dd, 3)
-
-
-def _calculate_omega(returns: list[float], threshold: float = 0.0) -> float | None:
-    """오메가 비율 — sum(양수 수익) / sum(|음수 수익|).
-
-    threshold 이상 수익의 합을 이하 손실의 합으로 나눈 비율.
-    > 1이면 양호.
-    """
-    if not returns:
-        return None
-    gains = sum(r - threshold for r in returns if r > threshold)
-    losses = sum(threshold - r for r in returns if r < threshold)
-    if losses == 0:
-        return None  # 손실 없으면 무한대 → None 처리
-    return round(gains / losses, 3)
+# 리스크 지표 함수는 src.analysis.risk_metrics 모듈로 이관됨.
+# 하위 호환용 별칭:
+_calculate_sharpe = calculate_sharpe
+_calculate_max_drawdown = calculate_max_drawdown
+_calculate_sortino = calculate_sortino
+_calculate_calmar = calculate_calmar
+_calculate_omega = calculate_omega
 
 
 def _calculate_monthly_win_rate(daily_results: list[DailyResult]) -> float | None:
@@ -349,47 +284,7 @@ def _calculate_monthly_win_rate(daily_results: list[DailyResult]) -> float | Non
     return round(winning_months / len(monthly_returns) * 100, 1)
 
 
-def _calculate_max_drawdown_days(returns: list[float]) -> int | None:
-    """MDD 회복 기간 — 최대 낙폭 시작부터 이전 고점 회복까지의 기간 수.
-
-    각 수익률 항목을 하나의 기간(20거래일 사이클)으로 간주한다.
-    """
-    if not returns:
-        return None
-
-    cumulative = 0.0
-    peak = 0.0
-    max_dd = 0.0
-    dd_start_idx = 0
-    max_dd_start = 0
-    max_dd_end = 0
-
-    for i, r in enumerate(returns):
-        cumulative += r
-        if cumulative > peak:
-            peak = cumulative
-            dd_start_idx = i + 1  # 새 고점 이후부터 낙폭 시작
-        dd = peak - cumulative
-        if dd > max_dd:
-            max_dd = dd
-            max_dd_start = dd_start_idx
-            max_dd_end = i
-
-    if max_dd == 0:
-        return 0
-
-    # 최대 낙폭 이후 회복 탐색
-    recovery_idx = None
-    for i in range(max_dd_end + 1, len(returns)):
-        cumulative_at_i = sum(returns[:i + 1])
-        if cumulative_at_i >= peak:
-            recovery_idx = i
-            break
-
-    if recovery_idx is not None:
-        return recovery_idx - max_dd_start
-    # 아직 회복하지 못한 경우 현재까지의 기간
-    return len(returns) - max_dd_start
+_calculate_max_drawdown_days = calculate_max_drawdown_days
 
 
 def _compute_holdout(
@@ -405,10 +300,10 @@ def _compute_holdout(
     return HoldoutResult(
         is_avg_return_20d=_safe_mean(is_returns),
         is_win_rate_20d=_win_rate(is_returns),
-        is_sharpe=_calculate_sharpe(is_returns, risk_free=rf_20d),
+        is_sharpe=calculate_sharpe(is_returns, risk_free=rf_20d),
         oos_avg_return_20d=_safe_mean(oos_returns),
         oos_win_rate_20d=_win_rate(oos_returns),
-        oos_sharpe=_calculate_sharpe(oos_returns, risk_free=rf_20d),
+        oos_sharpe=calculate_sharpe(oos_returns, risk_free=rf_20d),
         is_count=len(is_returns),
         oos_count=len(oos_returns),
     )

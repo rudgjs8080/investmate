@@ -438,14 +438,32 @@ def compute_calibration_curve(session: Session) -> dict[int, dict]:
             continue
         predicted = level / 10.0
         wins = sum(1 for f in entries if f.return_20d is not None and float(f.return_20d) > 0)
-        actual = wins / len(entries) if entries else 0
+        n = len(entries)
+        actual = wins / n if n else 0
+        ci_lower, ci_upper = _wilson_ci(wins, n)
         curve[level] = {
             "predicted": predicted,
             "actual": round(actual, 3),
-            "count": len(entries),
+            "count": n,
             "gap": round(actual - predicted, 3),
+            "ci_lower": round(ci_lower, 3),
+            "ci_upper": round(ci_upper, 3),
+            "is_significant": n >= 30,
         }
     return curve
+
+
+def _wilson_ci(wins: int, total: int, z: float = 1.96) -> tuple[float, float]:
+    """Wilson score 95% 신뢰구간."""
+    import math
+
+    if total == 0:
+        return (0.0, 1.0)
+    p_hat = wins / total
+    denom = 1 + z**2 / total
+    center = (p_hat + z**2 / (2 * total)) / denom
+    spread = z * math.sqrt(p_hat * (1 - p_hat) / total + z**2 / (4 * total**2)) / denom
+    return (max(0.0, center - spread), min(1.0, center + spread))
 
 
 def compute_ece(calibration_curve: dict[int, dict]) -> float:

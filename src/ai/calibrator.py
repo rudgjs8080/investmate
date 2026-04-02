@@ -104,8 +104,8 @@ def apply_calibration(parsed: list[dict], calibration: CalibrationResult) -> lis
     Returns:
         보정된 parsed 리스트 (원본 수정).
     """
-    if calibration.sample_size < 5:
-        return parsed  # 데이터 부족 → 보정 안 함
+    if calibration.sample_size < 10:
+        return parsed  # 샘플 10건 미만 → 통계적으로 불충분하여 보정 안 함
 
     for p in parsed:
         if not p.get("ai_approved"):

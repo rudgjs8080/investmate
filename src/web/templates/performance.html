@@ -18,79 +18,156 @@
 
 {% if perf and perf.total %}
 
-<!-- KPI (5열) -->
-<div class="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-6">
-    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 text-center">
-        <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold mb-1">총 추천</div>
-        <div class="text-3xl font-black">{{ perf.total }}</div>
-        <p class="text-xs text-gray-400 mt-1">수익률 데이터 {{ perf.with_data or 0 }}건</p>
-    </div>
-
-    <!-- 승률: 가용한 최장 기간 표시 -->
-    {% set main_wr = perf.win_rate_20d or perf.win_rate_10d or perf.win_rate_5d or perf.win_rate_1d %}
-    {% set main_wr_label = '20일' if perf.win_rate_20d else ('10일' if perf.win_rate_10d else ('5일' if perf.win_rate_5d else '1일')) %}
-    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 text-center">
-        <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold mb-1 cursor-help" title="추천 후 {{ main_wr_label }} 뒤 수익을 낸 비율">승률 ({{ main_wr_label }})</div>
-        <div class="text-3xl font-black {% if main_wr and main_wr > 55 %}text-emerald-500{% elif main_wr and main_wr < 45 %}text-red-500{% else %}text-amber-500{% endif %}">
-            {% if main_wr %}{{ "%.0f"|format(main_wr) }}%{% else %}-{% endif %}
-        </div>
-    </div>
-
-    <!-- 평균 수익: 가용 기간 -->
-    {% set main_ar = perf.avg_return_20d or perf.avg_return_10d or perf.avg_return_5d or perf.avg_return_1d %}
-    {% set main_ar_label = '20일' if perf.avg_return_20d else ('10일' if perf.avg_return_10d else ('5일' if perf.avg_return_5d else '1일')) %}
-    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 text-center">
-        <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold mb-1 cursor-help" title="추천 후 {{ main_ar_label }} 뒤 평균 수익률 (거래비용 차감)">평균 수익 ({{ main_ar_label }})</div>
-        <div class="text-3xl font-black {% if main_ar and main_ar > 0 %}text-emerald-500{% elif main_ar %}text-red-500{% else %}text-gray-400{% endif %}">
-            {% if main_ar %}{{ "{:+.1f}".format(main_ar) }}%{% else %}-{% endif %}
-        </div>
-    </div>
-
-    <!-- AI 추천 vs 전체 -->
-    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 text-center">
-        <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold mb-1 cursor-help" title="AI가 추천한 종목의 평균 수익 vs 전체 종목 평균 수익">AI추천 vs 전체</div>
-        {% if perf.ai_approved_avg is not none and perf.all_avg is not none %}
-        <div class="text-lg font-bold">
-            <span class="{% if perf.ai_approved_avg > 0 %}text-emerald-500{% else %}text-red-500{% endif %}">{{ "{:+.1f}".format(perf.ai_approved_avg) }}%</span>
-            <span class="text-gray-300 mx-1 text-sm">vs</span>
-            <span class="text-gray-500">{{ "{:+.1f}".format(perf.all_avg) }}%</span>
-        </div>
-        {% set alpha = perf.ai_approved_avg - perf.all_avg %}
-        <p class="text-xs mt-1 {% if alpha > 0 %}text-emerald-500{% else %}text-red-500{% endif %}">AI 초과수익 {{ "{:+.1f}".format(alpha) }}%</p>
-        {% else %}<div class="text-2xl font-black text-gray-300">-</div>{% endif %}
-    </div>
-
-    <!-- 베스트/워스트 종합 -->
-    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 text-center">
-        <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold mb-1">베스트 / 워스트</div>
-        {% if perf.best_pick %}
-        <div class="text-sm"><span class="text-emerald-500 font-bold">{{ perf.best_pick[0] }}</span> <span class="text-emerald-500">{{ "{:+.1f}%".format(perf.best_pick[1]) }}</span></div>
-        {% endif %}
-        {% if perf.worst_pick %}
-        <div class="text-sm"><span class="text-red-500 font-bold">{{ perf.worst_pick[0] }}</span> <span class="text-red-500">{{ "{:+.1f}%".format(perf.worst_pick[1]) }}</span></div>
-        {% endif %}
-        {% if not perf.best_pick and not perf.worst_pick %}<div class="text-2xl font-black text-gray-300">-</div>{% endif %}
+<!-- ═══════ 미실현 P&L 헤드라인 ═══════ -->
+<div id="pnlHeadline" class="hidden mb-4 bg-gradient-to-r from-gray-900 to-gray-800 dark:from-gray-800 dark:to-gray-700 rounded-xl p-3 px-5 text-white text-sm flex items-center justify-between">
+    <div class="flex items-center gap-4">
+        <span class="opacity-60">활성 포지션</span>
+        <span id="pnlCount" class="font-bold">-</span>
+        <span class="opacity-40">|</span>
+        <span class="opacity-60">미실현 P&L</span>
+        <span id="pnlTotal" class="font-bold">-</span>
     </div>
 </div>
 
-<!-- 기간별 상세 테이블 -->
+<!-- ═══════ KPI 카드 (7개) ═══════ -->
+<div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 mb-6">
+    <!-- 총추천 -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 text-center">
+        <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold mb-1">총 추천</div>
+        <div class="text-2xl font-black">{{ perf.total }}</div>
+        <p class="text-[10px] text-gray-400 mt-1">데이터 {{ perf.with_data or 0 }}건</p>
+    </div>
+
+    <!-- 가중 수익률 -->
+    {% set w_ar = perf.weighted_avg_return_20d or perf.weighted_avg_return_10d or perf.weighted_avg_return_5d or perf.weighted_avg_return_1d %}
+    {% set main_ar = perf.avg_return_20d or perf.avg_return_10d or perf.avg_return_5d or perf.avg_return_1d %}
+    {% set disp_ar = w_ar if w_ar is not none else main_ar %}
+    {% set ar_label = '가중' if w_ar is not none else '단순' %}
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 text-center">
+        <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold mb-1 cursor-help" title="포지션 가중치 반영 평균 수익률 (없으면 동일 가중)">수익률 ({{ ar_label }})</div>
+        <div class="text-2xl font-black {% if disp_ar and disp_ar > 0 %}text-emerald-500{% elif disp_ar and disp_ar < 0 %}text-red-500{% else %}text-gray-400{% endif %}">
+            {% if disp_ar is not none %}{{ "{:+.1f}%".format(disp_ar) }}{% else %}-{% endif %}
+        </div>
+    </div>
+
+    <!-- Alpha (vs S&P 500) -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 text-center">
+        <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold mb-1 cursor-help" title="S&P 500 대비 초과수익률">Alpha</div>
+        {% if perf.excess_return is not none %}
+        <div class="text-2xl font-black {% if perf.excess_return > 0 %}text-emerald-500{% elif perf.excess_return < 0 %}text-red-500{% else %}text-gray-400{% endif %}">{{ "{:+.1f}%".format(perf.excess_return) }}</div>
+        <p class="text-[10px] text-gray-400 mt-1">vs S&P 500</p>
+        {% else %}<div class="text-2xl font-black text-gray-300">-</div>{% endif %}
+    </div>
+
+    <!-- Sharpe -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 text-center">
+        <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold mb-1 cursor-help" title="연환산 샤프 비율 (>1.0 양호, >2.0 우수)">Sharpe</div>
+        {% if perf.sharpe is not none %}
+        <div class="text-2xl font-black {% if perf.sharpe >= 1.0 %}text-emerald-500{% elif perf.sharpe >= 0.5 %}text-amber-500{% else %}text-red-500{% endif %}">{{ "%.2f"|format(perf.sharpe) }}</div>
+        {% else %}<div class="text-2xl font-black text-gray-300">-</div>{% endif %}
+    </div>
+
+    <!-- Max Drawdown -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 text-center">
+        <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold mb-1 cursor-help" title="최대 낙폭 — 고점 대비 최대 하락폭">Max DD</div>
+        {% if perf.max_drawdown is not none %}
+        <div class="text-2xl font-black {% if perf.max_drawdown <= 5 %}text-emerald-500{% elif perf.max_drawdown <= 10 %}text-amber-500{% else %}text-red-500{% endif %}">-{{ "%.1f%%"|format(perf.max_drawdown) }}</div>
+        {% else %}<div class="text-2xl font-black text-gray-300">-</div>{% endif %}
+    </div>
+
+    <!-- 승률 -->
+    {% set main_wr = perf.win_rate_20d or perf.win_rate_10d or perf.win_rate_5d or perf.win_rate_1d %}
+    {% set main_wr_label = '20d' if perf.win_rate_20d else ('10d' if perf.win_rate_10d else ('5d' if perf.win_rate_5d else '1d')) %}
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 text-center">
+        <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold mb-1 cursor-help" title="추천 후 {{ main_wr_label }} 수익 달성 비율">승률 ({{ main_wr_label }})</div>
+        <div class="text-2xl font-black {% if main_wr and main_wr > 55 %}text-emerald-500{% elif main_wr and main_wr < 45 %}text-red-500{% else %}text-amber-500{% endif %}">
+            {% if main_wr %}{{ "%.0f%%"|format(main_wr) }}{% else %}-{% endif %}
+        </div>
+    </div>
+
+    <!-- AI vs 전체 -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 text-center">
+        <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold mb-1">AI vs 전체</div>
+        {% if perf.ai_approved_avg is not none and perf.all_avg is not none %}
+        {% set ai_alpha = perf.ai_approved_avg - perf.all_avg %}
+        <div class="text-2xl font-black {% if ai_alpha > 0 %}text-emerald-500{% elif ai_alpha < 0 %}text-red-500{% else %}text-gray-400{% endif %}">{{ "{:+.1f}%".format(ai_alpha) }}</div>
+        <p class="text-[10px] text-gray-400 mt-1">AI 초과수익</p>
+        {% else %}<div class="text-2xl font-black text-gray-300">-</div>{% endif %}
+    </div>
+</div>
+
+<!-- ═══════ 핵심 차트 2열 ═══════ -->
+<div class="grid md:grid-cols-2 gap-4 mb-5">
+    <!-- Equity Curve + 벤치마크 -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4">
+        <div class="flex justify-between items-center mb-2">
+            <span class="text-xs uppercase tracking-widest text-gray-400 font-semibold">누적 수익률</span>
+            <div class="flex items-center gap-3 text-[10px] text-gray-400">
+                <span><span class="inline-block w-3 h-0.5 bg-blue-500 mr-1"></span>포트폴리오</span>
+                <span><span class="inline-block w-3 h-0.5 bg-gray-400 mr-1"></span>S&P 500</span>
+            </div>
+        </div>
+        <div id="equityCurve" class="chart-lg"></div>
+        <div id="equityCurveEmpty" class="hidden chart-empty"><div class="chart-empty-icon">📈</div><div class="chart-empty-text">데이터가 축적되면 차트가 표시됩니다</div></div>
+    </div>
+
+    <!-- 리스크 지표 게이지 -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4">
+        <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">리스크 지표</div>
+        <div class="grid grid-cols-2 gap-3">
+            {% for name, val, good, bad, tip in [
+                ('Sharpe', perf.sharpe, 1.0, 0.5, '>1.0 양호, >2.0 우수'),
+                ('Sortino', perf.sortino, 1.5, 0.5, '>1.5 양호 (하방 리스크 조정)'),
+                ('Calmar', perf.calmar, 1.0, 0.3, '>1.0 양호 (수익/MDD)'),
+                ('Omega', perf.omega, 1.5, 1.0, '>1.0 양호 (Gain/Loss)')
+            ] %}
+            <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 text-center cursor-help" title="{{ tip }}">
+                <div class="text-[10px] uppercase tracking-wider text-gray-400 font-semibold mb-1">{{ name }}</div>
+                {% if val is not none %}
+                <div class="text-xl font-black {% if val >= good %}text-emerald-500{% elif val >= bad %}text-amber-500{% else %}text-red-500{% endif %}">{{ "%.2f"|format(val) }}</div>
+                {% else %}<div class="text-xl font-black text-gray-300">-</div>{% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {% if perf.information_ratio is not none %}
+        <div class="mt-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 text-center cursor-help" title="정보비율: Alpha / Tracking Error (>0.5 양호)">
+            <div class="text-[10px] uppercase tracking-wider text-gray-400 font-semibold mb-1">Information Ratio</div>
+            <div class="text-xl font-black {% if perf.information_ratio >= 0.5 %}text-emerald-500{% elif perf.information_ratio >= 0 %}text-amber-500{% else %}text-red-500{% endif %}">{{ "%.3f"|format(perf.information_ratio) }}</div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- ═══════ 기간별 상세 테이블 ═══════ -->
 <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden mb-5">
     <div class="px-4 py-3 border-b border-gray-100 dark:border-gray-700">
         <span class="text-xs uppercase tracking-widest text-gray-400 font-semibold">기간별 상세</span>
     </div>
     <table class="w-full text-sm">
         <thead><tr class="text-[11px] uppercase tracking-wider text-gray-400 border-b border-gray-100 dark:border-gray-700">
-            <th class="px-4 py-2 text-left">기간</th><th class="px-3 py-2 text-right">승률</th><th class="px-3 py-2 text-right">평균 수익률</th><th class="px-3 py-2 text-right">데이터</th>
+            <th class="px-4 py-2 text-left">기간</th>
+            <th class="px-3 py-2 text-right">승률</th>
+            <th class="px-3 py-2 text-right cursor-help" title="동일 가중 평균 수익률">단순 평균</th>
+            <th class="px-3 py-2 text-right cursor-help" title="포지션 가중치 반영 평균 수익률">가중 평균</th>
+            <th class="px-3 py-2 text-right">상태</th>
         </tr></thead>
         <tbody class="divide-y divide-gray-50 dark:divide-gray-700">
-            {% for label, wr, ar in [('1일', perf.win_rate_1d, perf.avg_return_1d), ('5일', perf.win_rate_5d, perf.avg_return_5d), ('10일', perf.win_rate_10d, perf.avg_return_10d), ('20일', perf.win_rate_20d, perf.avg_return_20d)] %}
+            {% for label, wr, ar, war in [
+                ('1일', perf.win_rate_1d, perf.avg_return_1d, perf.weighted_avg_return_1d),
+                ('5일', perf.win_rate_5d, perf.avg_return_5d, perf.weighted_avg_return_5d),
+                ('10일', perf.win_rate_10d, perf.avg_return_10d, perf.weighted_avg_return_10d),
+                ('20일', perf.win_rate_20d, perf.avg_return_20d, perf.weighted_avg_return_20d)
+            ] %}
             <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition">
                 <td class="px-4 py-2 font-medium">{{ label }}</td>
                 <td class="px-3 py-2 text-right tabular-nums {% if wr and wr >= 50 %}text-emerald-500 font-semibold{% elif wr and wr < 50 %}text-red-500{% endif %}">
-                    {% if wr is not none %}{{ "%.1f%%"|format(wr) }}{% else %}<span class="text-gray-300 cursor-help" title="아직 {{ label }} 경과한 데이터가 없습니다">미경과</span>{% endif %}
+                    {% if wr is not none %}{{ "%.1f%%"|format(wr) }}{% else %}<span class="text-gray-300">미경과</span>{% endif %}
                 </td>
                 <td class="px-3 py-2 text-right tabular-nums {% if ar and ar > 0 %}text-emerald-500{% elif ar and ar < 0 %}text-red-500{% endif %}">
                     {% if ar is not none %}{{ "{:+.2f}%".format(ar) }}{% else %}<span class="text-gray-300">-</span>{% endif %}
+                </td>
+                <td class="px-3 py-2 text-right tabular-nums font-semibold {% if war and war > 0 %}text-emerald-500{% elif war and war < 0 %}text-red-500{% endif %}">
+                    {% if war is not none %}{{ "{:+.2f}%".format(war) }}{% else %}<span class="text-gray-300">-</span>{% endif %}
                 </td>
                 <td class="px-3 py-2 text-right text-xs text-gray-400">{% if wr is not none %}있음{% else %}<span class="text-amber-400">축적 중</span>{% endif %}</td>
             </tr>
@@ -99,19 +176,7 @@
     </table>
 </div>
 
-<!-- 차트 2x2 -->
-<div class="grid md:grid-cols-2 gap-4 mb-5">
-    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4">
-        <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">승률 추이</div>
-        <div id="winRateChart" class="chart-md"></div>
-    </div>
-    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4">
-        <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">누적 수익률</div>
-        <div id="equityCurve" class="chart-md"></div>
-        <div id="equityCurveEmpty" class="hidden chart-empty"><div class="chart-empty-icon">📈</div><div class="chart-empty-text">데이터가 축적되면 차트가 표시됩니다</div></div>
-    </div>
-</div>
-
+<!-- ═══════ 분석 차트 2열 ═══════ -->
 <div class="grid md:grid-cols-2 gap-4 mb-5">
     <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4">
         <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">섹터별 수익률</div>
@@ -119,33 +184,45 @@
         <div id="sectorBarEmpty" class="hidden chart-empty"><div class="chart-empty-icon">📊</div><div class="chart-empty-text">섹터 데이터 축적 중</div></div>
     </div>
     <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4">
-        <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">최고/최저 종목</div>
-        <div id="topWorstChart" class="chart-md"></div>
-        <div id="topWorstEmpty" class="hidden chart-empty"><div class="chart-empty-icon">📊</div><div class="chart-empty-text">수익률 데이터 축적 중</div></div>
+        <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">수익률 분포</div>
+        <div id="distChart" class="chart-md"></div>
+        <div id="distChartEmpty" class="hidden chart-empty"><div class="chart-empty-icon">📊</div><div class="chart-empty-text">분포 데이터 축적 중</div></div>
     </div>
 </div>
 
-<!-- 수익률 분포 -->
+<!-- ═══════ 실행 비용 투명성 ═══════ -->
 <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 mb-5">
-    <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">수익률 분포</div>
-    <div id="distChart" class="chart-sm"></div>
-    <div id="distChartEmpty" class="hidden chart-empty"><div class="chart-empty-icon">📊</div><div class="chart-empty-text">분포 데이터 축적 중</div></div>
+    <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-3">실행 비용 분해</div>
+    <div id="costSection" class="grid grid-cols-3 gap-3">
+        <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 text-center">
+            <div class="text-[10px] uppercase tracking-wider text-gray-400 font-semibold mb-1">스프레드</div>
+            <div id="costSpread" class="text-lg font-bold text-gray-400">-</div>
+            <div class="text-[10px] text-gray-400">bps</div>
+        </div>
+        <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 text-center">
+            <div class="text-[10px] uppercase tracking-wider text-gray-400 font-semibold mb-1">시장충격</div>
+            <div id="costImpact" class="text-lg font-bold text-gray-400">-</div>
+            <div class="text-[10px] text-gray-400">bps</div>
+        </div>
+        <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 text-center">
+            <div class="text-[10px] uppercase tracking-wider text-gray-400 font-semibold mb-1">총 비용</div>
+            <div id="costTotal" class="text-lg font-bold text-gray-400">-</div>
+            <div class="text-[10px] text-gray-400">bps</div>
+        </div>
+    </div>
 </div>
 
-<!-- 최근 추천 테이블 -->
+<!-- ═══════ 최근 추천 테이블 ═══════ -->
 {% if perf.recent_picks %}
 <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
     <div class="px-4 py-3 border-b border-gray-100 dark:border-gray-700 flex justify-between items-center">
         <div class="flex items-center gap-3">
             <span class="text-xs uppercase tracking-widest text-gray-400 font-semibold">최근 추천 ({{ perf.recent_picks|length }}건)</span>
-            <!-- AI 범례 -->
             <div class="flex items-center gap-2 text-[10px] text-gray-400">
-                <span class="cursor-help" title="AI가 이 종목을 매수 추천했습니다 (신뢰도 숫자가 높을수록 확신)"><span class="text-emerald-500 font-bold">✓</span> AI추천</span>
-                <span class="cursor-help" title="AI가 이 종목을 추천에서 제외했습니다 (리스크 높음 또는 매력도 부족)"><span class="text-red-500 font-bold">✕</span> AI제외</span>
-                <span class="cursor-help" title="AI 분석이 아직 실행되지 않았습니다"><span class="text-gray-300">-</span> 미분석</span>
+                <span class="cursor-help" title="AI 추천"><span class="text-emerald-500 font-bold">✓</span> 추천</span>
+                <span class="cursor-help" title="AI 제외"><span class="text-red-500 font-bold">✕</span> 제외</span>
             </div>
         </div>
-        <!-- AI 필터 -->
         <div class="flex gap-1" id="aiFilter">
             <button onclick="filterAI('all')" class="px-2 py-1 text-[10px] rounded bg-indigo-500 text-white" data-filter="all">전체</button>
             <button onclick="filterAI('approved')" class="px-2 py-1 text-[10px] rounded bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300" data-filter="approved">AI추천</button>
@@ -155,7 +232,7 @@
     <div class="hidden md:block overflow-x-auto">
     <table class="w-full text-sm" id="recentTable">
         <thead><tr class="text-[11px] uppercase tracking-wider text-gray-400 border-b border-gray-100 dark:border-gray-700">
-            <th class="px-4 py-2 text-left">날짜</th><th class="px-3 py-2 text-left">종목</th><th class="px-3 py-2">점수</th><th class="px-3 py-2 text-right">1일</th><th class="px-3 py-2 text-right">5일</th><th class="px-3 py-2 text-right">10일</th><th class="px-3 py-2 text-right">20일</th><th class="px-3 py-2 text-center cursor-help" title="AI 분석 결과: ✓=추천, ✕=제외, -=미분석">AI</th>
+            <th class="px-4 py-2 text-left">날짜</th><th class="px-3 py-2 text-left">종목</th><th class="px-3 py-2">점수</th><th class="px-3 py-2 text-right">비중</th><th class="px-3 py-2 text-right">1일</th><th class="px-3 py-2 text-right">5일</th><th class="px-3 py-2 text-right">10일</th><th class="px-3 py-2 text-right">20일</th><th class="px-3 py-2 text-center">AI</th>
         </tr></thead>
         <tbody class="divide-y divide-gray-50 dark:divide-gray-700">
         {% for p in perf.recent_picks %}
@@ -166,19 +243,22 @@
                 {% if p.name %}<span class="text-[10px] text-gray-400 ml-1">{{ p.name[:12] }}</span>{% endif %}
             </td>
             <td class="px-3 py-2 text-center font-bold text-sm">{{ "%.1f"|format(p.score) }}</td>
+            <td class="px-3 py-2 text-right text-xs tabular-nums">
+                {% if p.position_weight %}{{ "%.1f%%"|format(p.position_weight * 100) }}{% else %}<span class="text-gray-300">-</span>{% endif %}
+            </td>
             {% for ret in [p.return_1d, p.return_5d, p.return_10d, p.return_20d] %}
             <td class="px-3 py-2 text-right tabular-nums text-xs">
                 {% if ret is not none %}
                 <span class="px-1.5 py-0.5 rounded {% if ret > 0 %}bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400{% elif ret < 0 %}bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400{% else %}text-gray-400{% endif %}">{{ "{:+.1f}%".format(ret) }}</span>
-                {% else %}<span class="text-gray-300 cursor-help" title="아직 해당 기간이 경과하지 않았습니다">-</span>{% endif %}
+                {% else %}<span class="text-gray-300">-</span>{% endif %}
             </td>
             {% endfor %}
             <td class="px-3 py-2 text-center">
                 {% if p.ai_approved is true %}
                 <span class="text-emerald-500 font-bold cursor-help" title="AI 추천 (신뢰도: {{ p.ai_confidence or '?' }}/10)">✓{% if p.ai_confidence %}<sup class="text-[9px]">{{ p.ai_confidence }}</sup>{% endif %}</span>
                 {% elif p.ai_approved is false %}
-                <span class="text-red-500 font-bold cursor-help" title="AI 제외 — 리스크가 높거나 매력도 부족">✕</span>
-                {% else %}<span class="text-gray-300 cursor-help" title="AI 분석 미실행">-</span>{% endif %}
+                <span class="text-red-500 font-bold cursor-help" title="AI 제외">✕</span>
+                {% else %}<span class="text-gray-300">-</span>{% endif %}
             </td>
         </tr>
         {% endfor %}
@@ -197,7 +277,7 @@
                 <span class="text-xs text-gray-400">{{ p.date }}</span>
             </div>
             <div class="flex justify-between items-center mt-1 text-xs">
-                <span>점수 {{ "%.1f"|format(p.score) }}</span>
+                <span>점수 {{ "%.1f"|format(p.score) }}{% if p.position_weight %} / {{ "%.1f%%"|format(p.position_weight * 100) }}{% endif %}</span>
                 <div class="flex gap-2">
                     {% if p.return_1d is not none %}<span class="{% if p.return_1d > 0 %}text-emerald-500{% elif p.return_1d < 0 %}text-red-500{% endif %}">1D {{ "{:+.1f}%".format(p.return_1d) }}</span>{% endif %}
                     {% if p.return_5d is not none %}<span class="{% if p.return_5d > 0 %}text-emerald-500{% elif p.return_5d < 0 %}text-red-500{% endif %}">5D {{ "{:+.1f}%".format(p.return_5d) }}</span>{% endif %}
@@ -221,21 +301,23 @@
 {% block scripts %}
 {% if perf and perf.total %}
 <script>
-// 승률 차트
-const wr = initChart('winRateChart');
-if (wr) wr.setOption(barChartOption(['1일','5일','10일','20일'], [{{ perf.win_rate_1d or 0 }}, {{ perf.win_rate_5d or 0 }}, {{ perf.win_rate_10d or 0 }}, {{ perf.win_rate_20d or 0 }}], [COLORS.cyan, COLORS.blue, COLORS.primary, COLORS.purple], { yMax: 100, unit: '%', decimals: 0 }));
-
-// 누적 수익률
+// ── Equity Curve + S&P 500 벤치마크 ──
 fetch('/api/equity-curve?days={{ days }}').then(r=>r.json()).then(d => {
     const c = initChart('equityCurve');
-    if (c && d.labels && d.labels.length) {
-        c.setOption(lineChartOption(d.labels, d.values, COLORS.blue, { dataZoom: true, unit: '%', decimals: 2, toolbox: true }));
-    } else {
+    if (!c || !d.labels || !d.labels.length) {
         document.getElementById('equityCurveEmpty')?.classList.remove('hidden');
+        return;
     }
+    const series = [{name: '포트폴리오', data: d.values, color: COLORS.blue}];
+    if (d.benchmark && d.benchmark.some(v => v !== null)) {
+        series.push({name: 'S&P 500', data: d.benchmark, color: '#9ca3af', lineType: 'dashed'});
+    }
+    c.setOption(lineChartOption(d.labels, series, COLORS.blue, {
+        dataZoom: true, unit: '%', decimals: 2, toolbox: true
+    }));
 }).catch(e => console.error(e));
 
-// 섹터별
+// ── 섹터별 ──
 fetch('/api/sector-heatmap?days={{ days }}').then(r=>r.json()).then(d => {
     const c = initChart('sectorBar');
     if (!c) return;
@@ -246,17 +328,7 @@ fetch('/api/sector-heatmap?days={{ days }}').then(r=>r.json()).then(d => {
     c.setOption(barChartOption(sectors, returns, returns.map(r => r > 0 ? COLORS.green : COLORS.red), { horizontal: true, unit: '%', decimals: 1 }));
 }).catch(e => console.error(e));
 
-// 최고/최저
-fetch('/api/top-worst-picks?n=5&days={{ days }}').then(r=>r.json()).then(d => {
-    const c = initChart('topWorstChart');
-    if (!c) return;
-    if (!d.top.length && !d.worst.length) { document.getElementById('topWorstEmpty')?.classList.remove('hidden'); return; }
-    const labels = [...d.top.map(x=>x.ticker), ...d.worst.map(x=>x.ticker)];
-    const values = [...d.top.map(x=>x.return), ...d.worst.map(x=>x.return)];
-    c.setOption(barChartOption(labels, values, values.map(v => v > 0 ? COLORS.green : COLORS.red), { horizontal: true, unit: '%', decimals: 1 }));
-}).catch(e => console.error(e));
-
-// 수익률 분포
+// ── 수익률 분포 ──
 fetch('/api/return-distribution?days={{ days }}').then(r=>r.json()).then(d => {
     const c = initChart('distChart');
     if (!c) return;
@@ -268,7 +340,27 @@ fetch('/api/return-distribution?days={{ days }}').then(r=>r.json()).then(d => {
     c.setOption(barChartOption(d.bins, d.counts, colors));
 }).catch(e => console.error(e));
 
-// AI 필터
+// ── 실행 비용 투명성 ──
+fetch('/api/cost-transparency?days={{ days }}').then(r=>r.json()).then(d => {
+    if (d.avg_spread_bps !== null) document.getElementById('costSpread').textContent = d.avg_spread_bps.toFixed(1);
+    if (d.avg_impact_bps !== null) document.getElementById('costImpact').textContent = d.avg_impact_bps.toFixed(1);
+    if (d.avg_total_bps !== null) document.getElementById('costTotal').textContent = d.avg_total_bps.toFixed(1);
+}).catch(e => console.error(e));
+
+// ── 미실현 P&L 헤드라인 ──
+fetch('/api/unrealized-pnl').then(r=>r.json()).then(d => {
+    if (d.count > 0) {
+        document.getElementById('pnlHeadline')?.classList.remove('hidden');
+        document.getElementById('pnlCount').textContent = d.count + '개';
+        if (d.total_pnl !== null) {
+            const el = document.getElementById('pnlTotal');
+            el.textContent = (d.total_pnl > 0 ? '+' : '') + d.total_pnl.toFixed(2) + '%';
+            el.className = 'font-bold ' + (d.total_pnl > 0 ? 'text-emerald-400' : 'text-red-400');
+        }
+    }
+}).catch(e => console.error(e));
+
+// ── AI 필터 ──
 function filterAI(type) {
     document.querySelectorAll('#aiFilter button').forEach(b => {
         b.className = b.dataset.filter === type

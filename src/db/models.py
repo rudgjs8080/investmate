@@ -359,6 +359,26 @@ class FactDailyRecommendation(TimestampMixin, Base):
     impact_cost_bps: Mapped[float | None] = mapped_column(Numeric, nullable=True)
     total_cost_bps: Mapped[float | None] = mapped_column(Numeric, nullable=True)
     daily_turnover: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    # 감사 추적 (Phase 3)
+    ai_confidence_raw: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ai_confidence_adjustments: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
+
+
+class FactDataQualityLog(TimestampMixin, Base):
+    """데이터 품질 검증 로그."""
+
+    __tablename__ = "fact_data_quality_log"
+
+    log_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_date_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("dim_date.date_id"), nullable=False
+    )
+    check_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    ticker: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    severity: Mapped[str] = mapped_column(String(10), nullable=False, default="info")
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    field_name: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    actual_value: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
 
 class FactAIFeedback(TimestampMixin, Base):
