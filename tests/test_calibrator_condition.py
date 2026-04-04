@@ -47,7 +47,7 @@ def _seed_dates(session):
             is_trading_day=d.weekday() < 5,
         ))
     session.add(DimMarket(market_id=1, code="US", name="US Market", currency="USD", timezone="US/Eastern"))
-    for i in range(1, 6):
+    for i in range(1, 15):
         session.add(DimStock(
             stock_id=i, ticker=f"T{i-1}", name=f"Test Stock {i}",
             market_id=1, is_active=True, is_sp500=True,
@@ -70,10 +70,10 @@ def _seed_macro(session, _seed_dates):
 
 @pytest.fixture
 def _seed_feedbacks(session, _seed_dates, _seed_macro):
-    """테스트 피드백 데이터 (5건)."""
+    """테스트 피드백 데이터 (12건 — MIN_CELL_SAMPLES=10 충족)."""
     run_date_id = date_to_id(date(2026, 1, 15))
 
-    for i in range(5):
+    for i in range(12):
         rec = FactDailyRecommendation(
             run_date_id=run_date_id,
             stock_id=i + 1,
@@ -100,7 +100,7 @@ def _seed_feedbacks(session, _seed_dates, _seed_macro):
             sector="Technology",
             ai_approved=True,
             ai_confidence=7,
-            return_20d=5.0 if i < 3 else -3.0,
+            return_20d=5.0 if i < 7 else -3.0,
         ))
     session.commit()
 

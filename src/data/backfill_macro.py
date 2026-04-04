@@ -6,23 +6,15 @@ import logging
 from datetime import date, timedelta
 
 import yfinance as yf
-from sqlalchemy.orm import Session
 
+from src.config import get_settings
+from src.data.macro_collector import MACRO_TICKERS
+from src.data.utils import extract_ticker_data, flatten_multiindex
 from src.db.engine import create_db_engine, get_session
 from src.db.helpers import date_to_id, ensure_date_ids
-from src.db.models import FactMacroIndicator
 from src.db.repository import MacroRepository
-from src.config import get_settings
 
 logger = logging.getLogger(__name__)
-
-MACRO_TICKERS = {
-    "vix": "^VIX",
-    "us_10y_yield": "^TNX",
-    "us_13w_yield": "^IRX",
-    "dollar_index": "DX-Y.NYB",
-    "sp500": "^GSPC",
-}
 
 
 def backfill_macro(days_back: int = 730) -> int:
@@ -74,19 +66,8 @@ def backfill_macro(days_back: int = 730) -> int:
 
             for key, ticker in MACRO_TICKERS.items():
                 try:
-                    if len(tickers) > 1 and ticker in df.columns.get_level_values(0):
-                        ticker_df = df[ticker]
-                    elif len(tickers) == 1:
-                        ticker_df = df
-                    else:
-                        continue
-
-                    # MultiIndex 컬럼 정리
-                    if hasattr(ticker_df.columns, "levels") and len(ticker_df.columns.levels) > 1:
-                        ticker_df = ticker_df.copy()
-                        ticker_df.columns = ticker_df.columns.get_level_values(0)
-
-                    if idx not in ticker_df.index:
+                    ticker_df = extract_ticker_data(df, ticker, tickers)
+                    if ticker_df is None or idx not in ticker_df.index:
                         continue
 
                     val = ticker_df.loc[idx, "Close"]
@@ -101,15 +82,13 @@ def backfill_macro(days_back: int = 730) -> int:
             # S&P 500 SMA20 계산
             if "sp500_close" in data:
                 try:
-                    sp500_ticker = MACRO_TICKERS["sp500"]
-                    if sp500_ticker in df.columns.get_level_values(0):
-                        sp_close = df[sp500_ticker]["Close"]
-                    else:
-                        sp_close = df["Close"]
-                    pos = list(sp_close.index).index(idx)
-                    if pos >= 19:
-                        sma20 = float(sp_close.iloc[pos - 19:pos + 1].mean())
-                        data["sp500_sma20"] = sma20
+                    sp500_df = extract_ticker_data(df, MACRO_TICKERS["sp500"], tickers)
+                    if sp500_df is not None:
+                        sp_close = sp500_df["Close"]
+                        pos = list(sp_close.index).index(idx)
+                        if pos >= 19:
+                            sma20 = float(sp_close.iloc[pos - 19:pos + 1].mean())
+                            data["sp500_sma20"] = sma20
                 except Exception:
                     pass
 

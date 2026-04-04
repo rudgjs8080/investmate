@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import date
 
 from fastapi import APIRouter, Depends, Request
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.db.helpers import date_to_id
-from src.db.repository import RecommendationRepository, MacroRepository
+from src.data.kr_names import get_kr_name
+from src.db.helpers import date_to_id, id_to_date
+from src.db.models import DimStock
+from src.db.repository import MacroRepository, RecommendationRepository
 from src.web.deps import get_db
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -26,22 +32,25 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
     sector_counts: dict[str, int] = {}
 
     if macro:
-        from src.db.helpers import id_to_date
         latest_date = id_to_date(macro.date_id)
         run_date_id = macro.date_id
 
         recs = RecommendationRepository.get_by_date(db, run_date_id)
-        from src.db.models import DimStock
-        from sqlalchemy import select
+
+        # 배치 프리로딩 — N+1 방지
+        stock_ids = [rec.stock_id for rec in recs]
+        stocks = {
+            s.stock_id: s
+            for s in db.execute(
+                select(DimStock).where(DimStock.stock_id.in_(stock_ids))
+            ).scalars().all()
+        } if stock_ids else {}
 
         for rec in recs:
-            stock = db.execute(
-                select(DimStock).where(DimStock.stock_id == rec.stock_id)
-            ).scalar_one_or_none()
+            stock = stocks.get(rec.stock_id)
             if stock:
                 sector = stock.sector.sector_name if stock.sector else "기타"
                 sector_counts[sector] = sector_counts.get(sector, 0) + 1
-                from src.data.kr_names import get_kr_name
                 recommendations.append({
                     "rank": rec.rank,
                     "ticker": stock.ticker,
@@ -97,8 +106,8 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
             "total": perf.total_recommendations,
             "with_data": perf.with_return_data,
         }
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("성과 요약 계산 실패: %s", e)
 
     return templates.TemplateResponse("dashboard.html", {
         "request": request,

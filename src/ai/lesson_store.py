@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 VALID_CATEGORIES = frozenset({"sector", "regime", "timing", "valuation", "general"})
 LESSON_EXPIRY_DAYS = 90
-MIN_EFFECTIVENESS_SAMPLES = 5
+MIN_EFFECTIVENESS_SAMPLES = 15
 
 
 @dataclass(frozen=True)

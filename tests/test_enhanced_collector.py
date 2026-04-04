@@ -13,8 +13,8 @@ from src.data.enhanced_collector import (
     collect_insider_trades,
     collect_institutional_holdings,
     collect_short_interest,
-    _safe_float,
 )
+from src.data.utils import safe_float
 
 
 class TestCollectInsiderTrades:
@@ -124,19 +124,19 @@ class TestCollectShortInterest:
 
 class TestSafeFloat:
     def test_valid_float(self):
-        assert _safe_float(42.5) == 42.5
+        assert safe_float(42.5) == 42.5
 
     def test_none(self):
-        assert _safe_float(None) is None
+        assert safe_float(None) is None
 
     def test_nan(self):
-        assert _safe_float(float("nan")) is None
+        assert safe_float(float("nan")) is None
 
     def test_string_number(self):
-        assert _safe_float("3.14") == 3.14
+        assert safe_float("3.14") == 3.14
 
     def test_invalid_string(self):
-        assert _safe_float("abc") is None
+        assert safe_float("abc") is None
 
 
 class TestCollectAllEnhanced:

@@ -35,16 +35,6 @@ class EnrichedStockData:
     recommendation_mean: float | None = None  # 애널리스트 평균 추천 (1=Strong Buy ~ 5=Sell)
 
 
-@dataclass(frozen=True)
-class MarketBreadthData:
-    """시장 전체 분위기 보강 데이터."""
-
-    sp500_pct_above_200sma: float | None = None  # S&P 500 중 200일선 위 종목 비율
-    advance_decline_ratio: float | None = None  # 상승/하락 비율
-    new_highs: int | None = None  # 신고가 종목 수
-    new_lows: int | None = None  # 신저가 종목 수
-
-
 def fetch_enriched_stock_data(tickers: list[str]) -> dict[str, EnrichedStockData]:
     """종목별 보강 데이터를 yfinance에서 수집한다.
 
@@ -118,50 +108,6 @@ def compute_sector_per_averages(tickers_with_sector: list[tuple[str, str, float 
         for sector, pers in sector_pers.items()
         if pers
     }
-
-
-def compute_short_momentum(
-    session: "Session", stock_id: int,
-) -> float | None:
-    """공매도 비율의 90일 변화를 계산한다 (현재 - 90일전).
-
-    양수 = 공매도 증가 (약세), 음수 = 공매도 감소 (강세).
-    """
-    from sqlalchemy import select, func
-    from src.db.models import FactValuation
-
-    try:
-        # 최신 공매도
-        latest = session.execute(
-            select(FactValuation.short_pct_of_float)
-            .where(FactValuation.stock_id == stock_id)
-            .where(FactValuation.short_pct_of_float.isnot(None))
-            .order_by(FactValuation.date_id.desc())
-            .limit(1)
-        ).scalar_one_or_none()
-
-        if latest is None:
-            return None
-
-        # 90일전 근사 (date_id 기준)
-        from src.db.helpers import date_to_id
-        from datetime import date, timedelta
-        old_id = date_to_id(date.today() - timedelta(days=90))
-        old = session.execute(
-            select(FactValuation.short_pct_of_float)
-            .where(FactValuation.stock_id == stock_id)
-            .where(FactValuation.date_id <= old_id)
-            .where(FactValuation.short_pct_of_float.isnot(None))
-            .order_by(FactValuation.date_id.desc())
-            .limit(1)
-        ).scalar_one_or_none()
-
-        if old is None:
-            return None
-
-        return round(float(latest) - float(old), 2)
-    except Exception:
-        return None
 
 
 def _pct(v: float | None) -> float | None:

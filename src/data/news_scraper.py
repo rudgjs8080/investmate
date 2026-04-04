@@ -85,8 +85,11 @@ def scrape_news(ticker: str, count: int = 10) -> list[NewsArticleData]:
 
         return articles
 
+    except (ConnectionError, TimeoutError, OSError) as e:
+        logger.warning("뉴스 수집 네트워크 오류 [%s]: %s", ticker, e)
+        return []
     except Exception as e:
-        logger.warning("뉴스 수집 실패 [%s]: %s", ticker, e)
+        logger.warning("뉴스 수집 실패 [%s]: %s — %s", ticker, type(e).__name__, e)
         return []
 
 

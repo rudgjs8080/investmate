@@ -932,7 +932,7 @@ def ml_status() -> None:
 
 @ml.command(name="train", help="수동 모델 학습")
 def ml_train() -> None:
-    from src.ml.trainer import train_classifier, train_return_model
+    from src.ml.trainer import train_return_model
     from src.ml.features import build_training_data
 
     settings = get_settings()
@@ -947,7 +947,6 @@ def ml_train() -> None:
 
     console.print("[dim]모델 학습 중...[/dim]")
     train_return_model(df)
-    train_classifier(df)
     console.print("[green]OK[/green] 모델 학습 완료")
 
 

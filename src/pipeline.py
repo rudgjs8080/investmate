@@ -732,7 +732,6 @@ class DailyPipeline:
 
     def step5_report(self) -> int:
         """데일리 리포트 생성."""
-        from src.reports.daily_report import generate_and_save_report
         from src.reports.terminal import render_daily_report
         from src.reports.assembler import assemble_enriched_report
 

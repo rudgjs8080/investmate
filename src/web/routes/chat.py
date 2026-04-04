@@ -4,21 +4,18 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 import logging
-import os
 import re
-import shutil
-import subprocess
 import time
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.db.models import DimStock, FactDailyRecommendation, FactMacroIndicator
+from src.ai.constants import NON_TICKERS
+from src.data.kr_names import get_kr_name
+from src.db.models import DimStock, FactDailyRecommendation
 from src.db.repository import MacroRepository, RecommendationRepository
 from src.web.deps import get_db
 
@@ -79,7 +76,7 @@ async def chat(request: Request, db: Session = Depends(get_db)):
         )
     except Exception as e:
         logger.warning("Chat Claude 호출 실패: %s", e)
-        return JSONResponse({"error": f"AI 응답 실패: {str(e)}"}, status_code=500)
+        return JSONResponse({"error": "AI 응답을 생성할 수 없습니다"}, status_code=500)
 
     if answer is None:
         return JSONResponse({"error": "AI 응답 시간 초과"}, status_code=504)
@@ -95,11 +92,10 @@ async def chat(request: Request, db: Session = Depends(get_db)):
 def _call_claude_with_history(
     system_msg: str, history: list[dict], message: str,
 ) -> str | None:
-    """Anthropic SDK (멀티턴) 우선, CLI 폴백."""
+    """Anthropic SDK 멀티턴 호출 (CLI fallback 제거 — SDK 전용)."""
     from src.config import get_settings
     settings = get_settings()
 
-    # 1순위: SDK 멀티턴
     try:
         from anthropic import Anthropic
         client = Anthropic()
@@ -112,42 +108,10 @@ def _call_claude_with_history(
         )
         return resp.content[0].text
     except ImportError:
-        pass
+        logger.warning("anthropic SDK 미설치 — 채팅 불가")
+        return None
     except Exception as e:
-        logger.debug("SDK 채팅 실패, CLI 폴백: %s", e)
-
-    # 2순위: CLI 싱글턴
-    claude_path = shutil.which("claude")
-    if not claude_path:
-        return None
-
-    full_prompt = f"{system_msg}\n\n사용자 질문: {message}"
-    return _call_claude_cli(claude_path, full_prompt)
-
-
-def _call_claude_cli(claude_path: str, prompt: str) -> str | None:
-    """Claude CLI를 동기 호출한다."""
-    env = os.environ.copy()
-    node_path = shutil.which("node")
-    if node_path:
-        env["PATH"] = str(Path(node_path).parent) + os.pathsep + env.get("PATH", "")
-
-    try:
-        result = subprocess.run(
-            [claude_path, "-p"],
-            input=prompt,
-            capture_output=True,
-            text=True,
-            timeout=CHAT_TIMEOUT,
-            env=env,
-            encoding="utf-8",
-            errors="replace",
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
-        logger.warning("Claude chat 실패 (code %d): %s", result.returncode, result.stderr[:200])
-        return None
-    except subprocess.TimeoutExpired:
+        logger.warning("SDK 채팅 호출 실패: %s", e)
         return None
 
 
@@ -178,7 +142,7 @@ def _build_chat_context(db: Session, message: str) -> str:
                     select(DimStock).where(DimStock.stock_id == rec.stock_id)
                 ).scalar_one_or_none()
                 if stock:
-                    from src.data.kr_names import get_kr_name
+
                     name = get_kr_name(stock.ticker, stock.name)
                     ai_str = ""
                     if rec.ai_approved is True:
@@ -195,9 +159,8 @@ def _build_chat_context(db: Session, message: str) -> str:
 
     # 특정 종목 언급 감지 → 상세 데이터 추가
     ticker_match = re.findall(r'\b([A-Z]{2,5})\b', message.upper())
-    _NON_TICKERS = {"AI", "RSI", "MACD", "SMA", "VIX", "PER", "PBR", "ROE", "ETF", "TOP"}
-    for t in ticker_match:
-        if t in _NON_TICKERS:
+    for t in ticker_match[:5]:  # 최대 5개 티커만 처리 (DoS 방지)
+        if t in NON_TICKERS:
             continue
         stock = db.execute(
             select(DimStock).where(DimStock.ticker == t)

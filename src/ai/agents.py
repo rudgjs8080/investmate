@@ -6,6 +6,8 @@ import json
 import logging
 from dataclasses import dataclass, field
 
+from src.ai.constants import get_analysis_model
+
 logger = logging.getLogger(__name__)
 
 
@@ -20,7 +22,7 @@ class AgentPersona:
 
     role: str  # "bull" | "bear" | "synthesizer"
     system_prompt: str
-    model: str = "claude-sonnet-4-20250514"
+    model: str = ""  # 빈 문자열이면 get_analysis_model() 사용
 
 
 @dataclass(frozen=True)
@@ -98,7 +100,7 @@ def get_bull_persona(
     return AgentPersona(
         role="bull",
         system_prompt=system,
-        model=model or "claude-sonnet-4-20250514",
+        model=model or get_analysis_model(),
     )
 
 
@@ -128,7 +130,7 @@ def get_bear_persona(
     return AgentPersona(
         role="bear",
         system_prompt=system,
-        model=model or "claude-sonnet-4-20250514",
+        model=model or get_analysis_model(),
     )
 
 
@@ -170,7 +172,7 @@ def get_synthesizer_persona(
     return AgentPersona(
         role="synthesizer",
         system_prompt=system,
-        model=model or "claude-sonnet-4-20250514",
+        model=model or get_analysis_model(),
     )
 
 
@@ -285,11 +287,10 @@ def _extract_arguments_from_text(text: str) -> list[dict]:
     ticker_pattern = re.compile(r'(?:^##?\s*|^\*\*|\b)([A-Z]{2,5})\b', re.MULTILINE)
     matches = ticker_pattern.findall(text)
 
-    non_tickers = {"TOP", "BUY", "USD", "RSI", "VIX", "ETF", "IPO", "CEO",
-                   "CFO", "THE", "FOR", "AND", "NOT", "JSON", "EPS", "PER"}
+    from src.ai.constants import NON_TICKERS
     seen: set[str] = set()
     for ticker in matches:
-        if ticker in non_tickers or ticker in seen:
+        if ticker in NON_TICKERS or ticker in seen:
             continue
         seen.add(ticker)
         # 해당 티커 부근 텍스트에서 요약 추출

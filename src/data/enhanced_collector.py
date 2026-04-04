@@ -10,7 +10,8 @@ import yfinance as yf
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 from sqlalchemy.orm import Session
 
-from src.db.helpers import date_to_id, ensure_date_ids
+from src.data.utils import safe_float
+from src.db.helpers import date_to_id, ensure_date_ids, id_to_date
 from src.db.models import DimStock
 from src.db.repository import (
     AnalystConsensusRepository,
@@ -56,12 +57,12 @@ def collect_insider_trades(ticker: str) -> list[dict]:
                 "insider_title": str(row.get("Position", "")) or None,
                 "transaction_type": str(row.get("Transaction", "Unknown")),
                 "shares": int(row.get("Shares", 0)),
-                "value": _safe_float(row.get("Value")),
+                "value": safe_float(row.get("Value")),
             })
 
         return trades
     except Exception as e:
-        logger.debug("내부자 거래 수집 실패 [%s]: %s", ticker, e)
+        logger.warning("내부자 거래 수집 실패 [%s]: %s", ticker, e)
         return []
 
 
@@ -83,13 +84,13 @@ def collect_institutional_holdings(ticker: str) -> list[dict]:
                 "date_id": did,
                 "institution_name": str(row.get("Holder", "Unknown")),
                 "shares": int(row.get("Shares", 0)),
-                "value": _safe_float(row.get("Value")),
-                "pct_of_shares": _safe_float(row.get("% Out")),
+                "value": safe_float(row.get("Value")),
+                "pct_of_shares": safe_float(row.get("% Out")),
             })
 
         return holdings
     except Exception as e:
-        logger.debug("기관 보유 수집 실패 [%s]: %s", ticker, e)
+        logger.warning("기관 보유 수집 실패 [%s]: %s", ticker, e)
         return []
 
 
@@ -119,16 +120,16 @@ def collect_analyst_consensus(ticker: str) -> dict | None:
             targets = t.analyst_price_targets
             if targets is not None:
                 if hasattr(targets, "get"):
-                    result["target_mean"] = _safe_float(targets.get("mean"))
-                    result["target_high"] = _safe_float(targets.get("high"))
-                    result["target_low"] = _safe_float(targets.get("low"))
-                    result["target_median"] = _safe_float(targets.get("median"))
+                    result["target_mean"] = safe_float(targets.get("mean"))
+                    result["target_high"] = safe_float(targets.get("high"))
+                    result["target_low"] = safe_float(targets.get("low"))
+                    result["target_median"] = safe_float(targets.get("median"))
         except Exception:
             pass
 
         return result
     except Exception as e:
-        logger.debug("애널리스트 수집 실패 [%s]: %s", ticker, e)
+        logger.warning("애널리스트 수집 실패 [%s]: %s", ticker, e)
         return None
 
 
@@ -154,14 +155,14 @@ def collect_earnings_surprises(ticker: str) -> list[dict]:
             surprises.append({
                 "date_id": date_to_id(report_date),
                 "period": period,
-                "eps_estimate": _safe_float(row.get("epsEstimate")),
-                "eps_actual": _safe_float(row.get("epsActual")),
-                "surprise_pct": _safe_float(row.get("surprisePercent")),
+                "eps_estimate": safe_float(row.get("epsEstimate")),
+                "eps_actual": safe_float(row.get("epsActual")),
+                "surprise_pct": safe_float(row.get("surprisePercent")),
             })
 
         return surprises
     except Exception as e:
-        logger.debug("실적 서프라이즈 수집 실패 [%s]: %s", ticker, e)
+        logger.warning("실적 서프라이즈 수집 실패 [%s]: %s", ticker, e)
         return []
 
 
@@ -170,11 +171,11 @@ def collect_short_interest(ticker: str) -> dict:
     try:
         info = _get_ticker_info(ticker).info
         return {
-            "short_ratio": _safe_float(info.get("shortRatio")),
-            "short_pct_of_float": _safe_float(info.get("shortPercentOfFloat")),
+            "short_ratio": safe_float(info.get("shortRatio")),
+            "short_pct_of_float": safe_float(info.get("shortPercentOfFloat")),
         }
     except Exception as e:
-        logger.debug("공매도 수집 실패 [%s]: %s", ticker, e)
+        logger.warning("공매도 수집 실패 [%s]: %s", ticker, e)
         return {}
 
 
@@ -206,7 +207,6 @@ def collect_all_enhanced(
             if trades:
                 all_dates = [date.today()]
                 for t in trades:
-                    from src.db.helpers import id_to_date
                     try:
                         all_dates.append(id_to_date(t["date_id"]))
                     except Exception:
@@ -234,7 +234,6 @@ def collect_all_enhanced(
                 all_dates = []
                 for s in surprises:
                     try:
-                        from src.db.helpers import id_to_date
                         all_dates.append(id_to_date(s["date_id"]))
                     except Exception:
                         pass
@@ -261,12 +260,3 @@ def collect_all_enhanced(
     return counts
 
 
-def _safe_float(val) -> float | None:  # noqa: ANN001
-    """안전하게 float 변환."""
-    if val is None:
-        return None
-    try:
-        f = float(val)
-        return None if str(f) == "nan" else f
-    except (TypeError, ValueError):
-        return None

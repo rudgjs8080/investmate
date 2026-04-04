@@ -83,13 +83,8 @@ def _classify_regime(
     vix: float, sp_close: float, sp_sma20: float
 ) -> str:
     """매크로 지표로 시장 체제를 분류한다."""
-    if vix > 30:
-        return "crisis"
-    if vix > 25 and sp_close < sp_sma20:
-        return "bear"
-    if vix < 20 and sp_close > sp_sma20:
-        return "bull"
-    return "range"
+    from src.ai.regime import classify_regime
+    return classify_regime(vix, sp_close, sp_sma20)
 
 
 def check_regime_change_trigger(

@@ -1,4 +1,4 @@
-"""Claude Code CLI를 통한 AI 분석 자동 호출."""
+"""Claude AI 분석 호출 — Tool Use + SDK fallback."""
 
 from __future__ import annotations
 
@@ -9,6 +9,8 @@ import shutil
 import subprocess
 from datetime import date
 from pathlib import Path
+
+from src.ai.constants import NON_TICKERS, get_analysis_model
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +125,7 @@ def run_claude_analysis_with_tools(
 
         client = Anthropic()
         message = client.messages.create(
-            model=model or "claude-sonnet-4-20250514",
+            model=model or get_analysis_model(),
             max_tokens=8192,
             tools=[STOCK_ANALYSIS_TOOL],
             tool_choice={"type": "tool", "name": "submit_stock_analysis"},
@@ -158,7 +160,7 @@ def run_claude_analysis_streaming(
         client = Anthropic()
         collected: list[str] = []
         with client.messages.stream(
-            model=model or "claude-sonnet-4-20250514",
+            model=model or get_analysis_model(),
             max_tokens=4096,
             messages=[{"role": "user", "content": prompt}],
         ) as stream:
@@ -184,7 +186,7 @@ def run_claude_analysis_sdk(
         from anthropic import Anthropic
         client = Anthropic()
         message = client.messages.create(
-            model=model or "claude-sonnet-4-20250514",
+            model=model or get_analysis_model(),
             max_tokens=4096,
             messages=[{"role": "user", "content": prompt}],
             timeout=timeout,
@@ -326,8 +328,7 @@ def parse_ai_response(response: str) -> list[dict]:
         # 티커 감지 (대문자 2-5글자, 일반 영단어 제외)
         ticker_match = re.search(r'\b([A-Z]{2,5})\b.*(?:추천|매수|선정|승인)', line)
         # "TOP", "BUY", "USD", "RSI" 등 비티커 제외
-        _NON_TICKERS = {"TOP", "BUY", "USD", "RSI", "VIX", "ETF", "IPO", "CEO", "CFO", "THE", "FOR", "AND", "NOT"}
-        if ticker_match and ticker_match.group(1) in _NON_TICKERS:
+        if ticker_match and ticker_match.group(1) in NON_TICKERS:
             ticker_match = None
         if ticker_match:
             if current_ticker and current_data:
@@ -344,7 +345,7 @@ def parse_ai_response(response: str) -> list[dict]:
 
         # 제외 종목 감지
         exclude_match = re.search(r'\b([A-Z]{2,5})\b.*(?:제외|비추|매수 추천하지)', line)
-        if exclude_match and exclude_match.group(1) in _NON_TICKERS:
+        if exclude_match and exclude_match.group(1) in NON_TICKERS:
             exclude_match = None
         if exclude_match:
             results.append({

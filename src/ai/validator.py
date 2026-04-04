@@ -149,12 +149,3 @@ def enforce_constraints(
     return warnings
 
 
-def calibrate_confidence(raw_confidence: int, calibration_curve: dict[int, dict]) -> int:
-    """과거 캘리브레이션 커브 기반으로 신뢰도를 보정한다."""
-    if not calibration_curve:
-        return raw_confidence
-    entry = calibration_curve.get(raw_confidence)
-    if not entry or entry["count"] < 5:
-        return raw_confidence
-    calibrated = round(entry["actual"] * 10)
-    return max(1, min(10, calibrated))

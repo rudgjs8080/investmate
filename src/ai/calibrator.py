@@ -137,7 +137,7 @@ CONFIDENCE_RANGES = {
     (9, 10): "9-10",
 }
 
-MIN_CELL_SAMPLES = 3
+MIN_CELL_SAMPLES = 10
 
 
 @dataclass(frozen=True)
@@ -164,26 +164,8 @@ def _confidence_to_range(confidence: int) -> str:
 
 def _estimate_regime_from_macro(session: Session, date_id: int) -> str:
     """특정 날짜의 시장 체제를 매크로 데이터로 추정한다."""
-    macro = session.scalar(
-        select(FactMacroIndicator)
-        .where(FactMacroIndicator.date_id <= date_id)
-        .order_by(FactMacroIndicator.date_id.desc())
-        .limit(1)
-    )
-    if macro is None:
-        return "range"
-
-    vix = float(macro.vix) if macro.vix else 20
-    sp_close = float(macro.sp500_close) if macro.sp500_close else 0
-    sp_sma20 = float(macro.sp500_sma20) if macro.sp500_sma20 else 0
-
-    if vix > 30:
-        return "crisis"
-    if vix > 25 and sp_close < sp_sma20:
-        return "bear"
-    if vix < 20 and sp_close > sp_sma20:
-        return "bull"
-    return "range"
+    from src.ai.regime import classify_regime_from_macro
+    return classify_regime_from_macro(session, date_id)
 
 
 def build_condition_calibration(

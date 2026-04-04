@@ -1,6 +1,6 @@
 """AI 분석 결과 검증기 테스트."""
 
-from src.ai.validator import calibrate_confidence, validate_ai_results
+from src.ai.validator import validate_ai_results
 
 
 class TestValidateTargetPrice:
@@ -75,23 +75,3 @@ class TestEmptyInput:
         assert warnings == []
 
 
-class TestCalibrateConfidence:
-    def test_calibrate_confidence_with_data(self):
-        """충분한 데이터가 있으면 보정된 값 반환."""
-        curve = {
-            8: {"predicted": 0.8, "actual": 0.5, "count": 10, "gap": -0.3},
-        }
-        result = calibrate_confidence(8, curve)
-        assert result == 5  # round(0.5 * 10) = 5
-
-    def test_calibrate_confidence_insufficient_data(self):
-        """데이터 5건 미만이면 원본 반환."""
-        curve = {
-            8: {"predicted": 0.8, "actual": 0.3, "count": 3, "gap": -0.5},
-        }
-        result = calibrate_confidence(8, curve)
-        assert result == 8  # count < 5 -> 원본
-
-    def test_calibrate_confidence_empty_curve(self):
-        """빈 커브면 원본 반환."""
-        assert calibrate_confidence(7, {}) == 7

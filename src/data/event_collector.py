@@ -33,24 +33,33 @@ class StockEventContext:
     is_post_earnings: bool = False  # 최근 2주 내 실적 발표 완료
 
 
-# 2026 FOMC 일정 (hardcoded — 매년 초 업데이트)
-FOMC_DATES_2026 = [
-    date(2026, 1, 28), date(2026, 1, 29),
-    date(2026, 3, 18), date(2026, 3, 19),
-    date(2026, 5, 6), date(2026, 5, 7),
-    date(2026, 6, 17), date(2026, 6, 18),
-    date(2026, 7, 29), date(2026, 7, 30),
-    date(2026, 9, 16), date(2026, 9, 17),
-    date(2026, 11, 4), date(2026, 11, 5),
-    date(2026, 12, 16), date(2026, 12, 17),
-]
+# FOMC 일정 — 연도별 관리 (매년 초 다음 연도 추가)
+FOMC_DATES: dict[int, list[date]] = {
+    2026: [
+        date(2026, 1, 28), date(2026, 1, 29),
+        date(2026, 3, 18), date(2026, 3, 19),
+        date(2026, 5, 6), date(2026, 5, 7),
+        date(2026, 6, 17), date(2026, 6, 18),
+        date(2026, 7, 29), date(2026, 7, 30),
+        date(2026, 9, 16), date(2026, 9, 17),
+        date(2026, 11, 4), date(2026, 11, 5),
+        date(2026, 12, 16), date(2026, 12, 17),
+    ],
+}
+
+# 하위 호환: 기존 코드에서 FOMC_DATES_2026을 참조하는 경우
+FOMC_DATES_2026 = FOMC_DATES[2026]
 
 
 def get_next_fomc_date(from_date: date) -> tuple[date, int] | None:
-    """다음 FOMC 회의일과 남은 일수를 반환한다."""
-    for fomc in FOMC_DATES_2026:
-        if fomc >= from_date:
-            return fomc, (fomc - from_date).days
+    """다음 FOMC 회의일과 남은 일수를 반환한다.
+
+    현재 연도와 다음 연도의 FOMC 일정을 순회하여 가장 가까운 미래 일정을 반환한다.
+    """
+    for year in (from_date.year, from_date.year + 1):
+        for fomc in FOMC_DATES.get(year, []):
+            if fomc >= from_date:
+                return fomc, (fomc - from_date).days
     return None
 
 

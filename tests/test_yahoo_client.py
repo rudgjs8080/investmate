@@ -122,33 +122,6 @@ class TestFetchFinancialData:
         assert val is None
 
 
-class TestFetchStockInfo:
-    @patch("src.data.yahoo_client.yf")
-    def test_returns_info(self, mock_yf):
-        from src.data.yahoo_client import fetch_stock_info
-
-        mock_ticker = MagicMock()
-        mock_ticker.info = {
-            "regularMarketPrice": 180.0,
-            "shortName": "Apple Inc.",
-            "sector": "Technology",
-            "industry": "Consumer Electronics",
-        }
-        mock_yf.Ticker.return_value = mock_ticker
-
-        info = fetch_stock_info("AAPL")
-        assert info is not None
-        assert info.ticker == "AAPL"
-        assert info.name == "Apple Inc."
-
-    @patch("src.data.yahoo_client.yf")
-    def test_returns_none_on_error(self, mock_yf):
-        from src.data.yahoo_client import fetch_stock_info
-
-        mock_yf.Ticker.side_effect = Exception("error")
-        assert fetch_stock_info("AAPL") is None
-
-
 class TestRetryOnTransientFailure:
     """리트라이 로직 테스트."""
 

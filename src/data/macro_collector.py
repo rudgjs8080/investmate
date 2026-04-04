@@ -9,6 +9,7 @@ import yfinance as yf
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from src.data.schemas import MacroData
+from src.data.utils import extract_ticker_data
 
 logger = logging.getLogger(__name__)
 
@@ -63,20 +64,9 @@ def collect_macro(target_date: date) -> MacroData:
     collected = 0
     for key, ticker in MACRO_TICKERS.items():
         try:
-            # MultiIndex에서 해당 티커 추출
-            if len(all_tickers) > 1 and ticker in df.columns.get_level_values(0):
-                ticker_df = df[ticker].dropna(how="all")
-            elif len(all_tickers) == 1:
-                ticker_df = df
-            else:
+            ticker_df = extract_ticker_data(df, ticker, all_tickers)
+            if ticker_df is None:
                 continue
-
-            if ticker_df.empty:
-                continue
-
-            # MultiIndex 컬럼 정리
-            if hasattr(ticker_df.columns, "levels") and len(ticker_df.columns.levels) > 1:
-                ticker_df.columns = ticker_df.columns.get_level_values(0)
 
             latest_close = float(ticker_df["Close"].iloc[-1])
 

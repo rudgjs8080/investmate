@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class DailyPriceData(BaseModel):
@@ -17,6 +17,12 @@ class DailyPriceData(BaseModel):
     close: float = Field(..., gt=0)
     volume: int = Field(..., ge=0)
     adj_close: float = Field(..., gt=0)
+
+    @model_validator(mode="after")
+    def validate_price_consistency(self) -> DailyPriceData:
+        if self.high < self.low:
+            raise ValueError(f"high({self.high}) < low({self.low})")
+        return self
 
 
 class FinancialRecord(BaseModel):

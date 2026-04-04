@@ -197,40 +197,19 @@ def _calculate_consensus(
 # ---------------------------------------------------------------------------
 
 
-def run_debate(
-    stock_data_prompt: str,
-    constraints: object | None = None,
-    model: str | None = None,
-    timeout: int = 300,
-) -> DebateResult:
-    """3라운드 멀티 에이전트 토론을 실행한다.
-
-    Args:
-        stock_data_prompt: build_unified_prompt() 결과.
-        constraints: ConstraintRules (Synthesizer hard_rules용).
-        model: AI 모델 (기본 claude-sonnet-4-20250514).
-        timeout: 라운드당 타임아웃 (초).
-
-    Returns:
-        DebateResult with final_parsed in same format as parse_ai_response.
-    """
-    from src.ai.claude_analyzer import STOCK_ANALYSIS_TOOL, _try_parse_json
-
-    stock_data = _extract_stock_data(stock_data_prompt)
-    bull_persona = get_bull_persona(constraints, model)
-    bear_persona = get_bear_persona(constraints, model)
-    synth_persona = get_synthesizer_persona(constraints, model)
-
-    rounds: list[DebateRound] = []
-
-    # ── Round 1: 독립 분석 (병렬) ──
+def _run_round1(
+    stock_data: str,
+    bull_persona: object,
+    bear_persona: object,
+    timeout: int,
+) -> tuple[AgentResponse, AgentResponse]:
+    """R1: Bull/Bear 독립 분석 (병렬 실행)."""
     logger.info("토론 R1: Bull/Bear 독립 분석 시작")
     r1_prompt = _build_round1_prompt(stock_data)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         fut_bull = executor.submit(call_agent, bull_persona, r1_prompt, timeout)
         fut_bear = executor.submit(call_agent, bear_persona, r1_prompt, timeout)
-
         bull_r1 = fut_bull.result(timeout=timeout + 30)
         bear_r1 = fut_bear.result(timeout=timeout + 30)
 
@@ -244,16 +223,20 @@ def run_debate(
         confidence=bear_r1.confidence, key_arguments=bear_r1.key_arguments,
         raw_response=bear_r1.raw_response,
     )
-    rounds.append(DebateRound(round_num=1, bull=bull_r1, bear=bear_r1))
     logger.info("토론 R1 완료: Bull %d자, Bear %d자",
                 len(bull_r1.analysis_text), len(bear_r1.analysis_text))
+    return bull_r1, bear_r1
 
-    # 빈 응답 체크
-    if not bull_r1.analysis_text and not bear_r1.analysis_text:
-        logger.warning("R1 양측 모두 빈 응답 — 토론 중단")
-        return DebateResult(rounds=tuple(rounds))
 
-    # ── Round 2: 교차 반박 (병렬) ──
+def _run_round2(
+    stock_data: str,
+    bull_r1: AgentResponse,
+    bear_r1: AgentResponse,
+    bull_persona: object,
+    bear_persona: object,
+    timeout: int,
+) -> tuple[AgentResponse, AgentResponse]:
+    """R2: 교차 반박 (병렬 실행, 실패 시 R1 결과 폴백)."""
     logger.info("토론 R2: 교차 반박 시작")
     bull_r2_prompt = _build_round2_bull_prompt(stock_data, bear_r1)
     bear_r2_prompt = _build_round2_bear_prompt(stock_data, bull_r1)
@@ -284,10 +267,20 @@ def run_debate(
         confidence=bear_r2.confidence, key_arguments=bear_r2.key_arguments,
         raw_response=bear_r2.raw_response,
     )
-    rounds.append(DebateRound(round_num=2, bull=bull_r2, bear=bear_r2))
     logger.info("토론 R2 완료")
+    return bull_r2, bear_r2
 
-    # ── Round 3: Synthesizer 판정 ──
+
+def _run_round3(
+    stock_data: str,
+    bull_r2: AgentResponse,
+    bear_r2: AgentResponse,
+    synth_persona: object,
+    timeout: int,
+) -> tuple[AgentResponse, list[dict], list[dict] | None]:
+    """R3: Synthesizer 종합 판정 (Tool Use 강제)."""
+    from src.ai.claude_analyzer import STOCK_ANALYSIS_TOOL, _try_parse_json
+
     logger.info("토론 R3: Synthesizer 종합 판정 시작")
     r3_prompt = _build_round3_prompt(stock_data, bull_r2, bear_r2)
 
@@ -304,7 +297,6 @@ def run_debate(
         raw_response=synth_response.raw_response,
     )
 
-    # Synthesizer Tool Use 결과 파싱
     final_parsed: list[dict] = []
     deep_dive: list[dict] | None = None
 
@@ -318,10 +310,54 @@ def run_debate(
         if parsed:
             final_parsed = parsed
 
-    rounds.append(DebateRound(round_num=3, synthesizer=synth_r3))
     logger.info("토론 R3 완료: %d종목 파싱", len(final_parsed))
+    return synth_r3, final_parsed, deep_dive
 
-    # 합의 강도
+
+def run_debate(
+    stock_data_prompt: str,
+    constraints: object | None = None,
+    model: str | None = None,
+    timeout: int = 300,
+) -> DebateResult:
+    """3라운드 멀티 에이전트 토론을 실행한다.
+
+    Args:
+        stock_data_prompt: build_unified_prompt() 결과.
+        constraints: ConstraintRules (Synthesizer hard_rules용).
+        model: AI 모델.
+        timeout: 라운드당 타임아웃 (초).
+
+    Returns:
+        DebateResult with final_parsed in same format as parse_ai_response.
+    """
+    stock_data = _extract_stock_data(stock_data_prompt)
+    bull_persona = get_bull_persona(constraints, model)
+    bear_persona = get_bear_persona(constraints, model)
+    synth_persona = get_synthesizer_persona(constraints, model)
+
+    rounds: list[DebateRound] = []
+
+    # R1: 독립 분석
+    bull_r1, bear_r1 = _run_round1(stock_data, bull_persona, bear_persona, timeout)
+    rounds.append(DebateRound(round_num=1, bull=bull_r1, bear=bear_r1))
+
+    if not bull_r1.analysis_text and not bear_r1.analysis_text:
+        logger.warning("R1 양측 모두 빈 응답 — 토론 중단")
+        return DebateResult(rounds=tuple(rounds))
+
+    # R2: 교차 반박
+    bull_r2, bear_r2 = _run_round2(
+        stock_data, bull_r1, bear_r1, bull_persona, bear_persona, timeout,
+    )
+    rounds.append(DebateRound(round_num=2, bull=bull_r2, bear=bear_r2))
+
+    # R3: Synthesizer 판정
+    synth_r3, final_parsed, deep_dive = _run_round3(
+        stock_data, bull_r2, bear_r2, synth_persona, timeout,
+    )
+    rounds.append(DebateRound(round_num=3, synthesizer=synth_r3))
+
     consensus = _calculate_consensus(bull_r2, bear_r2, final_parsed)
     logger.info("토론 합의 강도: %s", consensus)
 

@@ -200,17 +200,8 @@ def find_retrospective_candidates(
 
 def _estimate_regime(macro: FactMacroIndicator) -> str:
     """매크로 지표로 시장 체제를 간략 추정한다."""
-    vix = float(macro.vix) if macro.vix else 20
-    sp_close = float(macro.sp500_close) if macro.sp500_close else 0
-    sp_sma20 = float(macro.sp500_sma20) if macro.sp500_sma20 else 0
-
-    if vix > 30:
-        return "crisis"
-    if vix > 25 and sp_close < sp_sma20:
-        return "bear"
-    if vix < 20 and sp_close > sp_sma20:
-        return "bull"
-    return "range"
+    from src.ai.regime import classify_regime_from_record
+    return classify_regime_from_record(macro)
 
 
 # ---------------------------------------------------------------------------
@@ -398,7 +389,8 @@ def _call_retrospective_ai(prompt: str, settings: object) -> dict | None:
         from anthropic import Anthropic
 
         client = Anthropic()
-        model = getattr(settings, "ai_model_analysis", "claude-sonnet-4-20250514")
+        from src.ai.constants import get_analysis_model
+        model = getattr(settings, "ai_model_analysis", None) or get_analysis_model()
         timeout = getattr(settings, "ai_timeout", 300)
 
         message = client.messages.create(

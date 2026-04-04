@@ -11,46 +11,14 @@ import pandas as pd
 import yfinance as yf
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
-from src.data.schemas import DailyPriceData, FinancialRecord, StockInfo, ValuationRecord
+from src.data.circuit_breaker import CircuitBreaker
+from src.data.schemas import DailyPriceData, FinancialRecord, ValuationRecord
+from src.data.utils import flatten_multiindex
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_BATCH_SIZE = 50
 BATCH_DELAY_SEC = 1.0
-
-
-# ---------------------------------------------------------------------------
-# Circuit Breaker
-# ---------------------------------------------------------------------------
-
-class CircuitBreaker:
-    """간이 서킷브레이커 — 연속 실패 시 호출 차단."""
-
-    def __init__(self, fail_threshold: int = 5, reset_seconds: int = 60):
-        self._failures = 0
-        self._threshold = fail_threshold
-        self._reset_at = 0.0
-        self._reset_seconds = reset_seconds
-
-    def record_failure(self):
-        self._failures += 1
-        if self._failures >= self._threshold:
-            self._reset_at = time.time() + self._reset_seconds
-            logger.warning("서킷브레이커 OPEN: %d회 연속 실패", self._failures)
-
-    def record_success(self):
-        if self._failures > 0:
-            self._failures = 0
-
-    @property
-    def is_open(self) -> bool:
-        if self._failures < self._threshold:
-            return False
-        if time.time() >= self._reset_at:
-            self._failures = 0  # Reset after timeout
-            return False
-        return True
-
 
 _yf_breaker = CircuitBreaker(fail_threshold=5, reset_seconds=60)
 
@@ -162,9 +130,7 @@ def batch_download_prices(
 
 def _df_to_prices(df: pd.DataFrame) -> list[DailyPriceData]:
     """DataFrame을 DailyPriceData 리스트로 변환한다."""
-    # MultiIndex 컬럼 정리
-    if hasattr(df.columns, "levels") and len(df.columns.levels) > 1:
-        df.columns = df.columns.get_level_values(0)
+    df = flatten_multiindex(df)
 
     prices = []
     for idx, row in df.iterrows():
@@ -186,23 +152,6 @@ def _df_to_prices(df: pd.DataFrame) -> list[DailyPriceData]:
             continue
 
     return prices
-
-
-def fetch_stock_info(ticker: str) -> StockInfo | None:
-    """종목 기본 정보를 조회한다."""
-    try:
-        info = yf.Ticker(ticker).info
-        if not info or info.get("regularMarketPrice") is None:
-            return None
-
-        name = info.get("shortName") or info.get("longName") or ticker
-        sector = info.get("sector")
-        industry = info.get("industry")
-
-        return StockInfo(ticker=ticker, name=name, sector=sector, industry=industry)
-    except Exception as e:
-        logger.warning("종목 정보 조회 실패 [%s]: %s", ticker, e)
-        return None
 
 
 def fetch_financial_data(
