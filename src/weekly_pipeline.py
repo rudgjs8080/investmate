@@ -245,7 +245,7 @@ class WeeklyPipeline:
         from src.alerts.notifier import send_weekly_summary
 
         settings = get_settings()
-        channel = getattr(settings, "notify_channel", None)
+        channel = getattr(settings, "notify_channels", None)
 
         if report is None:
             logger.info("리포트 없음, 알림 스킵")
