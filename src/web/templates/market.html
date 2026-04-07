@@ -54,7 +54,7 @@
 
 <!-- Fear & Greed 히스토리 차트 -->
 <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 mb-5">
-    <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">Fear & Greed vs S&P 500</div>
+    <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">Fear & Greed vs VIX vs S&P 500</div>
     <div id="fgChart" class="chart-md"></div>
 </div>
 
@@ -109,7 +109,8 @@ fetch('/api/macro-history?days=1095').then(r=>r.json()).then(d => {
                     formatter: function(params) {
                         var html = '<div style="font-size:12px;font-weight:600;margin-bottom:4px">' + fmtDate(params[0].axisValue) + '</div>';
                         params.forEach(function(p) {
-                            var val = p.value != null ? (p.seriesIndex === 0 ? fmtNum(p.value, 1) : fmtNum(p.value, 0)) : '-';
+                            var dec = p.seriesName === 'S&P 500' ? 0 : 1;
+                            var val = p.value != null ? fmtNum(p.value, dec) : '-';
                             html += '<div style="margin-top:3px;display:flex;align-items:center;gap:6px">'
                                 + '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + p.color + '"></span>'
                                 + '<span style="flex:1">' + p.seriesName + '</span>'
@@ -128,7 +129,7 @@ fetch('/api/macro-history?days=1095').then(r=>r.json()).then(d => {
                 },
                 yAxis: [
                     {
-                        type: 'value', name: 'F&G', min: 0, max: 100,
+                        type: 'value', name: 'F&G / VIX', min: 0, max: 100,
                         splitLine: { lineStyle: { color: 'rgba(0,0,0,0.06)' } },
                         axisLabel: { fontSize: 10 }
                     },
@@ -163,6 +164,12 @@ fetch('/api/macro-history?days=1095').then(r=>r.json()).then(d => {
                             { value: 25, label: 'Extreme Fear', color: '#ef4444' },
                             { value: 75, label: 'Extreme Greed', color: '#06b6d4', type: 'solid', width: 2 }
                         ])
+                    },
+                    {
+                        name: 'VIX',
+                        type: 'line', data: d.vix, yAxisIndex: 0,
+                        smooth: 0.4, symbol: 'none',
+                        lineStyle: { color: COLORS.red, width: 1.5, type: 'dashed' }
                     },
                     {
                         name: 'S&P 500',
