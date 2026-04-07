@@ -54,9 +54,28 @@
 
 <!-- Fear & Greed 히스토리 차트 -->
 <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 mb-5">
-    <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">Fear & Greed vs VIX vs S&P 500</div>
+    <div class="flex items-center justify-between mb-3">
+        <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold">시장 심리 종합 차트</div>
+        <div class="flex gap-1.5" id="fgToggles">
+            <button data-series="Fear & Greed" class="fg-toggle active px-2.5 py-1 rounded-full text-[11px] font-semibold transition-all" style="--tc:#8b5cf6" onclick="toggleFgSeries(this)">
+                <span class="inline-block w-2 h-2 rounded-full mr-1" style="background:#8b5cf6"></span>F&G
+            </button>
+            <button data-series="VIX" class="fg-toggle active px-2.5 py-1 rounded-full text-[11px] font-semibold transition-all" style="--tc:#ef4444" onclick="toggleFgSeries(this)">
+                <span class="inline-block w-2 h-2 rounded-full mr-1" style="background:#ef4444"></span>VIX
+            </button>
+            <button data-series="S&P 500" class="fg-toggle active px-2.5 py-1 rounded-full text-[11px] font-semibold transition-all" style="--tc:#3b82f6" onclick="toggleFgSeries(this)">
+                <span class="inline-block w-2 h-2 rounded-full mr-1" style="background:#3b82f6"></span>S&P 500
+            </button>
+        </div>
+    </div>
     <div id="fgChart" class="chart-md"></div>
 </div>
+<style>
+.fg-toggle { border: 1.5px solid var(--tc); color: var(--tc); background: transparent; cursor: pointer; }
+.fg-toggle.active { background: var(--tc); color: #fff; }
+.fg-toggle.active span { background: #fff !important; }
+.dark .fg-toggle { opacity: 0.9; }
+</style>
 
 <!-- 차트 2x2 -->
 <div class="grid md:grid-cols-2 gap-4 mb-5">
@@ -87,6 +106,14 @@
 {% block scripts %}
 {% if macro %}
 <script>
+var _fgChart = null;
+function toggleFgSeries(btn) {
+    if (!_fgChart) return;
+    var name = btn.getAttribute('data-series');
+    btn.classList.toggle('active');
+    _fgChart.dispatchAction({ type: 'legendToggleSelect', name: name });
+}
+
 {% if macro.fear_greed_index is not none %}
 var fgGauge = initChart('fearGreedGauge');
 if (fgGauge) fgGauge.setOption(gaugeChartOption({{ macro.fear_greed_index }}, '{{ macro.fear_greed_rating or "" }}'));
@@ -96,7 +123,8 @@ fetch('/api/macro-history?days=1095').then(r=>r.json()).then(d => {
     // Fear & Greed + S&P 500 듀얼 Y축 차트
     var fgVals = d.fear_greed ? d.fear_greed.filter(function(v){ return v !== null; }) : [];
     if (fgVals.length > 0) {
-        var fgC = initChart('fgChart');
+        _fgChart = initChart('fgChart');
+        var fgC = _fgChart;
         if (fgC) {
             var isDark = document.documentElement.classList.contains('dark');
             var dataLen = d.labels.length;
@@ -119,8 +147,8 @@ fetch('/api/macro-history?days=1095').then(r=>r.json()).then(d => {
                         return html;
                     }
                 },
-                legend: { bottom: 22, textStyle: { fontSize: 11 } },
-                grid: { left: '3%', right: '3%', top: '8%', bottom: '18%', containLabel: true },
+                legend: { show: false },
+                grid: { left: '3%', right: '3%', top: '8%', bottom: '12%', containLabel: true },
                 xAxis: {
                     type: 'category', data: d.labels,
                     axisLabel: { fontSize: 10 },
