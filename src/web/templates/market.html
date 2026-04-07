@@ -54,7 +54,7 @@
 
 <!-- Fear & Greed 히스토리 차트 -->
 <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 mb-5">
-    <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">Fear & Greed 추이 (1년)</div>
+    <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">Fear & Greed vs S&P 500</div>
     <div id="fgChart" class="chart-md"></div>
 </div>
 
@@ -93,19 +93,95 @@ if (fgGauge) fgGauge.setOption(gaugeChartOption({{ macro.fear_greed_index }}, '{
 {% endif %}
 
 fetch('/api/macro-history?days=1095').then(r=>r.json()).then(d => {
-    // Fear & Greed 히스토리 차트
+    // Fear & Greed + S&P 500 듀얼 Y축 차트
     var fgVals = d.fear_greed ? d.fear_greed.filter(function(v){ return v !== null; }) : [];
     if (fgVals.length > 0) {
         var fgC = initChart('fgChart');
-        if (fgC) fgC.setOption(lineChartOption(d.labels, d.fear_greed, COLORS.purple, {
-            dataZoom: true, toolbox: true,
-            markLines: [
-                { value: 25, label: 'Extreme Fear', color: '#ef4444' },
-                { value: 45, label: 'Fear', color: '#f97316' },
-                { value: 55, label: 'Greed', color: '#22c55e' },
-                { value: 75, label: 'Extreme Greed', color: '#06b6d4', type: 'solid', width: 2 },
-            ]
-        }));
+        if (fgC) {
+            var isDark = document.documentElement.classList.contains('dark');
+            var dataLen = d.labels.length;
+            var dzStart = dataLen > 120 ? (100 - 120 / dataLen * 100) : 0;
+            fgC.setOption({
+                tooltip: {
+                    trigger: 'axis',
+                    backgroundColor: 'rgba(0,0,0,0.75)',
+                    textStyle: { color: '#fff', fontSize: 12 },
+                    formatter: function(params) {
+                        var html = '<div style="font-size:12px;font-weight:600;margin-bottom:4px">' + fmtDate(params[0].axisValue) + '</div>';
+                        params.forEach(function(p) {
+                            var val = p.value != null ? (p.seriesIndex === 0 ? fmtNum(p.value, 1) : fmtNum(p.value, 0)) : '-';
+                            html += '<div style="margin-top:3px;display:flex;align-items:center;gap:6px">'
+                                + '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + p.color + '"></span>'
+                                + '<span style="flex:1">' + p.seriesName + '</span>'
+                                + '<b>' + val + '</b></div>';
+                        });
+                        return html;
+                    }
+                },
+                legend: { bottom: 22, textStyle: { fontSize: 11 } },
+                grid: { left: '3%', right: '3%', top: '8%', bottom: '18%', containLabel: true },
+                xAxis: {
+                    type: 'category', data: d.labels,
+                    axisLabel: { fontSize: 10 },
+                    axisLine: { lineStyle: { color: '#ddd' } },
+                    splitLine: { show: false }
+                },
+                yAxis: [
+                    {
+                        type: 'value', name: 'F&G', min: 0, max: 100,
+                        splitLine: { lineStyle: { color: 'rgba(0,0,0,0.06)' } },
+                        axisLabel: { fontSize: 10 }
+                    },
+                    {
+                        type: 'value', name: 'S&P 500', min: 'dataMin', max: 'dataMax',
+                        splitLine: { show: false },
+                        axisLabel: { fontSize: 10 }
+                    }
+                ],
+                dataZoom: [
+                    { type: 'inside' },
+                    { type: 'slider', height: 18, bottom: 2, start: dzStart, end: 100,
+                      borderColor: 'transparent', backgroundColor: 'rgba(0,0,0,0.03)',
+                      fillerColor: 'rgba(99,102,241,0.08)', handleStyle: { color: '#6366f1' } }
+                ],
+                toolbox: { show: true, feature: { saveAsImage: { title: '저장', pixelRatio: 2 } }, right: 10, top: 0, iconStyle: { borderColor: '#94a3b8' } },
+                series: [
+                    {
+                        name: 'Fear & Greed',
+                        type: 'line', data: d.fear_greed, yAxisIndex: 0,
+                        smooth: 0.4, symbol: 'none',
+                        lineStyle: { color: COLORS.purple, width: 2.5 },
+                        areaStyle: {
+                            color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+                                colorStops: [
+                                    { offset: 0, color: colorWithAlpha(COLORS.purple, 0.15) },
+                                    { offset: 1, color: colorWithAlpha(COLORS.purple, 0.005) }
+                                ]
+                            }
+                        },
+                        markLine: buildMarkLine([
+                            { value: 25, label: 'Extreme Fear', color: '#ef4444' },
+                            { value: 75, label: 'Extreme Greed', color: '#06b6d4', type: 'solid', width: 2 }
+                        ])
+                    },
+                    {
+                        name: 'S&P 500',
+                        type: 'line', data: d.sp500, yAxisIndex: 1,
+                        smooth: 0.4, symbol: 'none',
+                        lineStyle: { color: COLORS.blue, width: 2, type: 'solid' },
+                        areaStyle: {
+                            color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+                                colorStops: [
+                                    { offset: 0, color: colorWithAlpha(COLORS.blue, 0.08) },
+                                    { offset: 1, color: colorWithAlpha(COLORS.blue, 0.005) }
+                                ]
+                            }
+                        }
+                    }
+                ],
+                animationDuration: 800
+            });
+        }
     }
 
     const mk = (id, vals, color, extra) => { const c = initChart(id); if (c && vals) c.setOption(lineChartOption(d.labels, vals, color, Object.assign({ dataZoom: true, toolbox: true }, extra || {}))); };
