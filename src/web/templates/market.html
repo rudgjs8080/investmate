@@ -8,18 +8,32 @@
 </div>
 
 {% if macro %}
-<!-- 시장 점수 히어로 -->
-<div class="rounded-2xl p-8 text-center mb-6 {% if macro.market_score and macro.market_score >= 7 %}bg-gradient-to-br from-emerald-50 to-green-50 dark:from-emerald-900/20 dark:to-green-900/20{% elif macro.market_score and macro.market_score <= 3 %}bg-gradient-to-br from-red-50 to-rose-50 dark:from-red-900/20 dark:to-rose-900/20{% else %}bg-gradient-to-br from-amber-50 to-yellow-50 dark:from-amber-900/20 dark:to-yellow-900/20{% endif %} border border-gray-100 dark:border-gray-700 shadow-sm">
-    <div class="text-6xl font-black {% if macro.market_score and macro.market_score >= 7 %}text-emerald-500{% elif macro.market_score and macro.market_score <= 3 %}text-red-500{% else %}text-amber-500{% endif %}">
-        {{ macro.market_score or '-' }}<span class="text-xl font-normal text-gray-400">/10</span>
+<!-- 히어로: Fear & Greed + 시장 점수 -->
+<div class="grid md:grid-cols-2 gap-4 mb-6">
+    <!-- Fear & Greed 게이지 -->
+    <div class="rounded-2xl p-6 text-center bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-900 border border-gray-100 dark:border-gray-700 shadow-sm">
+        <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">Fear & Greed Index</div>
+        {% if macro.fear_greed_index is not none %}
+        <div id="fearGreedGauge" style="height: 220px;"></div>
+        {% else %}
+        <div class="flex items-center justify-center h-[220px] text-gray-400">데이터 없음</div>
+        {% endif %}
     </div>
-    <p class="text-base font-semibold mt-2 text-gray-600 dark:text-gray-300">
-        {% if macro.market_score and macro.market_score >= 8 %}강한 상승장 — 적극 매수
-        {% elif macro.market_score and macro.market_score >= 6 %}안정적 시장 — 선별 매수
-        {% elif macro.market_score and macro.market_score >= 4 %}중립 — 신중한 접근
-        {% elif macro.market_score and macro.market_score >= 2 %}약세 — 현금 비중 확대
-        {% else %}극단적 약세 — 방어 전략{% endif %}
-    </p>
+    <!-- 시장 점수 -->
+    <div class="rounded-2xl p-6 text-center {% if macro.market_score and macro.market_score >= 7 %}bg-gradient-to-br from-emerald-50 to-green-50 dark:from-emerald-900/20 dark:to-green-900/20{% elif macro.market_score and macro.market_score <= 3 %}bg-gradient-to-br from-red-50 to-rose-50 dark:from-red-900/20 dark:to-rose-900/20{% else %}bg-gradient-to-br from-amber-50 to-yellow-50 dark:from-amber-900/20 dark:to-yellow-900/20{% endif %} border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col justify-center">
+        <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">시장 점수</div>
+        <div class="text-6xl font-black {% if macro.market_score and macro.market_score >= 7 %}text-emerald-500{% elif macro.market_score and macro.market_score <= 3 %}text-red-500{% else %}text-amber-500{% endif %}">
+            {{ macro.market_score or '-' }}<span class="text-xl font-normal text-gray-400">/10</span>
+        </div>
+        <p class="text-base font-semibold mt-2 text-gray-600 dark:text-gray-300">
+            {% if macro.market_score and macro.market_score >= 8 %}강한 상승장 — 적극 매수
+            {% elif macro.market_score and macro.market_score >= 6 %}안정적 시장 — 선별 매수
+            {% elif macro.market_score and macro.market_score >= 4 %}중립 — 신중한 접근
+            {% elif macro.market_score and macro.market_score >= 2 %}약세 — 현금 비중 확대
+            {% else %}극단적 약세 — 방어 전략{% endif %}
+        </p>
+        {% if macro.vix %}<p class="text-xs text-gray-400 mt-2">VIX {{ "%.1f"|format(macro.vix) }} | S&P {{ "{:,.0f}".format(macro.sp500) if macro.sp500 else '-' }}</p>{% endif %}
+    </div>
 </div>
 
 <!-- KPI -->
@@ -36,6 +50,12 @@
         {% if extra %}<p class="text-xs text-gray-400 mt-1">{{ extra }}</p>{% endif %}
     </div>
     {% endfor %}
+</div>
+
+<!-- Fear & Greed 히스토리 차트 -->
+<div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 mb-5">
+    <div class="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">Fear & Greed 추이 (1년)</div>
+    <div id="fgChart" class="chart-md"></div>
 </div>
 
 <!-- 차트 2x2 -->
@@ -67,7 +87,27 @@
 {% block scripts %}
 {% if macro %}
 <script>
+{% if macro.fear_greed_index is not none %}
+var fgGauge = initChart('fearGreedGauge');
+if (fgGauge) fgGauge.setOption(gaugeChartOption({{ macro.fear_greed_index }}, '{{ macro.fear_greed_rating or "" }}'));
+{% endif %}
+
 fetch('/api/macro-history?days=1095').then(r=>r.json()).then(d => {
+    // Fear & Greed 히스토리 차트
+    var fgVals = d.fear_greed ? d.fear_greed.filter(function(v){ return v !== null; }) : [];
+    if (fgVals.length > 0) {
+        var fgC = initChart('fgChart');
+        if (fgC) fgC.setOption(lineChartOption(d.labels, d.fear_greed, COLORS.purple, {
+            dataZoom: true, toolbox: true,
+            markLines: [
+                { value: 25, label: 'Extreme Fear', color: '#ef4444' },
+                { value: 45, label: 'Fear', color: '#f97316' },
+                { value: 55, label: 'Greed', color: '#22c55e' },
+                { value: 75, label: 'Extreme Greed', color: '#06b6d4', type: 'solid', width: 2 },
+            ]
+        }));
+    }
+
     const mk = (id, vals, color, extra) => { const c = initChart(id); if (c && vals) c.setOption(lineChartOption(d.labels, vals, color, Object.assign({ dataZoom: true, toolbox: true }, extra || {}))); };
     mk('vixChart', d.vix, COLORS.red, {
         markLines: [

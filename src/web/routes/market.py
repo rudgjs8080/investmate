@@ -29,6 +29,8 @@ def market_page(request: Request, db: Session = Depends(get_db)):
             "yield_13w": float(macro.us_13w_yield) if macro.us_13w_yield else None,
             "dollar": float(macro.dollar_index) if macro.dollar_index else None,
             "market_score": macro.market_score,
+            "fear_greed_index": float(macro.fear_greed_index) if macro.fear_greed_index else None,
+            "fear_greed_rating": macro.fear_greed_rating,
         }
 
     return templates.TemplateResponse("market.html", {

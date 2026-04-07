@@ -79,6 +79,13 @@ def analyze_macro(
         elif macro.dollar_index < 95:
             score += 1.0  # 약달러 = 수출 순풍
 
+    # Fear & Greed 보정
+    if macro.fear_greed_index is not None:
+        if macro.fear_greed_index <= 25:
+            score += 1.0  # Extreme Fear → 역발상 매수 기회
+        elif macro.fear_greed_index > 75:
+            score -= 1.0  # Extreme Greed → 과열 주의
+
     # 전일 대비 추세 보정
     if previous_macro is not None:
         score += _macro_trend_adjustment(macro, previous_macro)

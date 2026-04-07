@@ -306,6 +306,8 @@ class FactMacroIndicator(TimestampMixin, Base):
     gold_price: Mapped[float | None] = mapped_column(Numeric, nullable=True)
     oil_price: Mapped[float | None] = mapped_column(Numeric, nullable=True)
     yield_spread: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    fear_greed_index: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    fear_greed_rating: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
 
 class FactDailyRecommendation(TimestampMixin, Base):

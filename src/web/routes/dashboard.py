@@ -118,6 +118,8 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
             "sp500": float(macro.sp500_close) if macro and macro.sp500_close else None,
             "dollar": float(macro.dollar_index) if macro and macro.dollar_index else None,
             "yield_10y": float(macro.us_10y_yield) if macro and macro.us_10y_yield else None,
+            "fear_greed_index": float(macro.fear_greed_index) if macro and macro.fear_greed_index else None,
+            "fear_greed_rating": macro.fear_greed_rating if macro else None,
         } if macro else {},
         "recommendations": recommendations,
         "sector_counts": sector_counts,

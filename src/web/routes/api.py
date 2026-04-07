@@ -414,8 +414,9 @@ def macro_history(days: int = Query(default=365, ge=1, le=3650), db: Session = D
         yield_10y.append(float(m.us_10y_yield) if m.us_10y_yield else None)
 
     dollar = [float(m.dollar_index) if m.dollar_index else None for m in macros]
+    fear_greed = [float(m.fear_greed_index) if m.fear_greed_index else None for m in macros]
 
-    return {"labels": labels, "vix": vix, "sp500": sp500, "yield_10y": yield_10y, "dollar": dollar}
+    return {"labels": labels, "vix": vix, "sp500": sp500, "yield_10y": yield_10y, "dollar": dollar, "fear_greed": fear_greed}
 
 
 @router.get("/win-rates")

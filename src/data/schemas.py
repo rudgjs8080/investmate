@@ -75,6 +75,8 @@ class MacroData(BaseModel):
     gold_price: float | None = None
     oil_price: float | None = None
     yield_spread: float | None = None
+    fear_greed_index: float | None = None
+    fear_greed_rating: str | None = None
 
 
 class RecommendationData(BaseModel):

@@ -397,6 +397,23 @@ class DailyPipeline:
         except Exception as e:
             logger.warning("매크로 수집 실패: %s", e)
 
+        # Fear & Greed Index 수집
+        try:
+            from src.data.fear_greed import fetch_fear_greed
+
+            fg = fetch_fear_greed()
+            if fg:
+                score, rating = fg
+                with get_session(self.engine) as session:
+                    ensure_date_ids(session, [self.target_date])
+                    MacroRepository.upsert(session, self.run_date_id, {
+                        "fear_greed_index": score,
+                        "fear_greed_rating": rating,
+                    })
+                total += 1
+        except Exception as e:
+            logger.warning("Fear & Greed 수집 실패: %s", e)
+
         return total
 
     def step2_analyze(self) -> int:

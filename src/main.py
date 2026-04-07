@@ -676,6 +676,19 @@ def update_sp500() -> None:
         )
 
 
+@db.command(name="backfill-fg", help="Fear & Greed Index 히스토리 백필 (~1년)")
+def backfill_fg() -> None:
+    """CNN Fear & Greed Index 히스토리를 DB에 백필한다."""
+    from src.data.fear_greed import backfill_fear_greed_to_db
+
+    settings = get_settings()
+    engine = create_db_engine(settings.db_path)
+
+    console.print("[cyan]Fear & Greed 히스토리 백필 시작...[/cyan]")
+    count = backfill_fear_greed_to_db(engine)
+    console.print(f"[green]완료[/green] {count}건 적재")
+
+
 # ──────────────────────────────────────────
 # config — 설정 관리
 # ──────────────────────────────────────────

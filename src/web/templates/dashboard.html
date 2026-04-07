@@ -55,7 +55,18 @@
 
 {% if macro %}
 <!-- KPI 스트립 -->
-<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
+<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 text-center">
+        <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold mb-1">F&G</div>
+        <div class="text-2xl font-bold {% if macro.fear_greed_index and macro.fear_greed_index <= 25 %}text-red-500{% elif macro.fear_greed_index and macro.fear_greed_index > 75 %}text-cyan-500{% elif macro.fear_greed_index and macro.fear_greed_index > 55 %}text-emerald-500{% else %}text-amber-500{% endif %}">
+            {{ "%.0f"|format(macro.fear_greed_index) if macro.fear_greed_index else '-' }}
+        </div>
+        {% if macro.fear_greed_rating %}
+        <span class="inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold mt-1 {% if 'Fear' in macro.fear_greed_rating %}bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400{% elif 'Greed' in macro.fear_greed_rating %}bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400{% else %}bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400{% endif %}">
+            {{ macro.fear_greed_rating }}
+        </span>
+        {% endif %}
+    </div>
     <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 text-center">
         <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold mb-1">시장 점수</div>
         <div class="text-3xl font-black {% if macro.market_score and macro.market_score >= 7 %}text-emerald-500{% elif macro.market_score and macro.market_score <= 3 %}text-red-500{% else %}text-amber-500{% endif %}">

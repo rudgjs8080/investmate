@@ -460,6 +460,72 @@ function pieChartOption(labels, data, opts) {
     };
 }
 
+// ─── 게이지 차트 (Fear & Greed 등) ────────────────
+
+function gaugeChartOption(value, rating, opts) {
+    opts = opts || {};
+    var isDark = document.documentElement.classList.contains('dark');
+    return {
+        series: [{
+            type: 'gauge',
+            startAngle: 180,
+            endAngle: 0,
+            min: 0,
+            max: 100,
+            center: ['50%', '70%'],
+            radius: '100%',
+            axisLine: {
+                lineStyle: {
+                    width: 20,
+                    color: [
+                        [0.25, '#ef4444'],
+                        [0.45, '#f97316'],
+                        [0.55, '#eab308'],
+                        [0.75, '#22c55e'],
+                        [1, '#06b6d4']
+                    ]
+                }
+            },
+            pointer: {
+                icon: 'path://M12.8,0.7l12,40.1H0.7L12.8,0.7z',
+                length: '55%',
+                width: 8,
+                offsetCenter: [0, '-10%'],
+                itemStyle: { color: isDark ? '#e5e7eb' : '#374151' }
+            },
+            axisTick: { show: false },
+            splitLine: { show: false },
+            axisLabel: {
+                distance: -30,
+                fontSize: 10,
+                color: isDark ? '#9ca3af' : '#6b7280',
+                formatter: function(v) {
+                    if (v === 0) return 'Extreme\nFear';
+                    if (v === 50) return 'Neutral';
+                    if (v === 100) return 'Extreme\nGreed';
+                    return '';
+                }
+            },
+            title: {
+                offsetCenter: [0, '20%'],
+                fontSize: 13,
+                fontWeight: 600,
+                color: isDark ? '#d1d5db' : '#4b5563'
+            },
+            detail: {
+                fontSize: 32,
+                fontWeight: 'bolder',
+                offsetCenter: [0, '-5%'],
+                valueAnimation: true,
+                formatter: function(v) { return v != null ? v.toFixed(0) : '-'; },
+                color: isDark ? '#f3f4f6' : '#1f2937'
+            },
+            data: [{ value: value, name: rating || '' }]
+        }],
+        animationDuration: 1200,
+    };
+}
+
 // ─── 글로벌 디바운스 리사이즈 (단일 핸들러) ────────────────
 
 var _resizeTimer;
