@@ -53,6 +53,24 @@ class Settings(BaseSettings):
     notify_channels: str | None = Field(
         default=None, alias="INVESTMATE_NOTIFY_CHANNELS"
     )
+    telegram_token: str | None = Field(
+        default=None, alias="INVESTMATE_TELEGRAM_TOKEN"
+    )
+    telegram_chat_id: str | None = Field(
+        default=None, alias="INVESTMATE_TELEGRAM_CHAT_ID"
+    )
+    slack_webhook: str | None = Field(
+        default=None, alias="INVESTMATE_SLACK_WEBHOOK"
+    )
+    smtp_user: str | None = Field(
+        default=None, alias="INVESTMATE_SMTP_USER"
+    )
+    smtp_pass: str | None = Field(
+        default=None, alias="INVESTMATE_SMTP_PASS"
+    )
+    email_to: str | None = Field(
+        default=None, alias="INVESTMATE_EMAIL_TO"
+    )
     # 스크리너 설정 (환경변수로 조정 가능)
     screener_min_data_days: int = Field(default=60, alias="INVESTMATE_MIN_DATA_DAYS")
     screener_min_volume: int = Field(default=100_000, alias="INVESTMATE_MIN_VOLUME")

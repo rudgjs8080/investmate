@@ -103,10 +103,11 @@ def send_weekly_summary(
 
 def _send_telegram(message: str) -> bool:
     """텔레그램 봇으로 메시지를 전송한다."""
-    import os
+    from src.config import get_settings
 
-    token = os.getenv("INVESTMATE_TELEGRAM_TOKEN")
-    chat_id = os.getenv("INVESTMATE_TELEGRAM_CHAT_ID")
+    settings = get_settings()
+    token = settings.telegram_token
+    chat_id = settings.telegram_chat_id
     if not token or not chat_id:
         logger.warning("텔레그램 설정 없음 (INVESTMATE_TELEGRAM_TOKEN, INVESTMATE_TELEGRAM_CHAT_ID)")
         return False
@@ -125,9 +126,10 @@ def _send_telegram(message: str) -> bool:
 
 def _send_slack(message: str) -> bool:
     """슬랙 웹훅으로 메시지를 전송한다."""
-    import os
+    from src.config import get_settings
 
-    webhook_url = os.getenv("INVESTMATE_SLACK_WEBHOOK")
+    settings = get_settings()
+    webhook_url = settings.slack_webhook
     if not webhook_url:
         logger.warning("슬랙 설정 없음 (INVESTMATE_SLACK_WEBHOOK)")
         return False
@@ -159,13 +161,15 @@ def _detect_smtp_provider(smtp_user: str) -> tuple[str, int]:
 
 def _send_email(message: str, run_date: date) -> bool:
     """이메일로 리포트를 전송한다."""
-    import os
     import smtplib
     from email.mime.text import MIMEText
 
-    smtp_user = os.getenv("INVESTMATE_SMTP_USER")
-    smtp_pass = os.getenv("INVESTMATE_SMTP_PASS")
-    to_email = os.getenv("INVESTMATE_EMAIL_TO")
+    from src.config import get_settings
+
+    settings = get_settings()
+    smtp_user = settings.smtp_user
+    smtp_pass = settings.smtp_pass
+    to_email = settings.email_to
     if not all([smtp_user, smtp_pass, to_email]):
         logger.warning("이메일 설정 없음 (INVESTMATE_SMTP_USER, INVESTMATE_SMTP_PASS, INVESTMATE_EMAIL_TO)")
         return False
@@ -213,7 +217,6 @@ def send_weekly_report_email(
     dashboard_url: str | None = None,
 ) -> bool:
     """주간 리포트 PDF를 첨부하여 이메일로 전송한다."""
-    import os
     import smtplib
     from email import encoders
     from email.mime.base import MIMEBase
@@ -221,9 +224,12 @@ def send_weekly_report_email(
     from email.mime.text import MIMEText
     from pathlib import Path
 
-    smtp_user = os.getenv("INVESTMATE_SMTP_USER")
-    smtp_pass = os.getenv("INVESTMATE_SMTP_PASS")
-    to_email = os.getenv("INVESTMATE_EMAIL_TO")
+    from src.config import get_settings
+
+    settings = get_settings()
+    smtp_user = settings.smtp_user
+    smtp_pass = settings.smtp_pass
+    to_email = settings.email_to
     if not all([smtp_user, smtp_pass, to_email]):
         logger.warning("이메일 설정 없음 — 주간 리포트 이메일 스킵")
         return False
