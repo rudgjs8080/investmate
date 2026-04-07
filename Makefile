@@ -22,6 +22,9 @@ run-step5: ## 리포트만 재생성 (step 5)
 report: ## 최신 리포트 출력
 	uv run python -m src.main report latest
 
+weekly: ## 주간 리포트 생성
+	uv run python -m src.main report weekly
+
 improve: ## 자율 반복 개선 루프 (기본 3회)
 	bash scripts/auto_improve.sh 3 25
 

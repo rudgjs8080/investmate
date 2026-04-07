@@ -898,6 +898,43 @@ crontab -l
 cat /home/ec2-user/investmate/logs/$(date +%Y-%m-%d)_batch.log
 ```
 
+### 10-5. 주간 리포트 배치 스크립트
+
+주간 리포트도 자동으로 실행되도록 래퍼 스크립트를 등록합니다.
+
+> 주간 리포트 스크립트(`scripts/run_weekly.sh`)는 이미 리포지토리에 포함되어 있습니다.
+> `git pull` 후 실행 권한만 부여하면 됩니다.
+
+```bash
+chmod +x /home/ec2-user/investmate/scripts/run_weekly.sh
+```
+
+### 10-6. 주간 cron 등록
+
+```bash
+crontab -e
+```
+
+기존 줄 아래에 추가:
+
+```
+# 매주 일요일 오전 9시 KST에 주간 리포트 실행
+0 9 * * 0 /home/ec2-user/investmate/scripts/run_weekly.sh
+```
+
+### 10-7. 주간 배치 수동 테스트
+
+```bash
+# 스크립트가 정상 동작하는지 직접 실행해봅니다
+/home/ec2-user/investmate/scripts/run_weekly.sh
+
+# 로그 확인
+cat /home/ec2-user/investmate/logs/$(date +%Y-%m-%d)_weekly.log
+
+# 생성된 리포트 확인
+ls -la /home/ec2-user/investmate/reports/weekly/
+```
+
 ---
 
 ## 15. STEP 11 — 모니터링 및 알림 설정
@@ -1196,6 +1233,7 @@ HTTP2=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://localhost/)
 echo ""
 echo "=== 9. cron 등록 ==="
 crontab -l 2>/dev/null | grep -q "run_batch" && echo "OK: 배치 cron 등록됨" || echo "FAIL: 배치 cron 없음"
+crontab -l 2>/dev/null | grep -q "run_weekly" && echo "OK: 주간 cron 등록됨" || echo "FAIL: 주간 cron 없음"
 crontab -l 2>/dev/null | grep -q "healthcheck" && echo "OK: 헬스체크 cron 등록됨" || echo "FAIL: 헬스체크 cron 없음"
 
 echo ""
