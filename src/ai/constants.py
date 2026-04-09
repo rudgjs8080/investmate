@@ -46,4 +46,5 @@ NON_TICKERS: frozenset[str] = frozenset({
     "YOY", "QOQ", "YTD", "Q1", "Q2", "Q3", "Q4",
     "LOW", "HIGH", "RISK", "STOP", "USA", "FED",
     "BULL", "BEAR", "PUT", "CALL", "OTC", "IPO",
+    "ADD", "TRIM", "EXIT",
 })

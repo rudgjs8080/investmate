@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+
+{% block title %}예측 정확도{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+    <!-- Breadcrumb -->
+    <nav class="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 mb-6">
+        <a href="/personal" class="hover:text-indigo-500">개인 분석</a>
+        <span>/</span>
+        <span class="text-gray-900 dark:text-gray-100 font-medium">예측 정확도</span>
+    </nav>
+
+    <h1 class="text-2xl font-bold mb-6">예측 정확도 리더보드</h1>
+
+    {% if not accuracy_scores %}
+    <div class="bg-white dark:bg-gray-800 rounded-xl p-12 text-center border border-gray-200 dark:border-gray-700">
+        <p class="text-gray-500 dark:text-gray-400 text-lg">아직 만기 도래한 예측이 없습니다.</p>
+        <p class="text-gray-400 dark:text-gray-500 mt-2 text-sm">분석 시작 후 1개월 뒤부터 데이터가 축적됩니다.</p>
+    </div>
+    {% else %}
+
+    <!-- 정확도 바 차트 -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700 mb-6">
+        <h2 class="text-lg font-semibold mb-3">종목별 정확도 비교</h2>
+        <div id="accuracyChart" class="chart-md"></div>
+    </div>
+
+    <!-- 리더보드 테이블 -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 mb-6 overflow-hidden">
+        <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+            <h2 class="text-lg font-semibold">종목별 리더보드</h2>
+            <!-- 기간별 필터 -->
+            <div class="flex gap-1">
+                <button data-filter="all" class="px-3 py-1 text-xs rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400 font-medium">전체</button>
+                <button data-filter="1M" class="px-3 py-1 text-xs rounded-full bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400 hover:bg-indigo-50">1M</button>
+                <button data-filter="3M" class="px-3 py-1 text-xs rounded-full bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400 hover:bg-indigo-50">3M</button>
+                <button data-filter="6M" class="px-3 py-1 text-xs rounded-full bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400 hover:bg-indigo-50">6M</button>
+            </div>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead class="bg-gray-50 dark:bg-gray-700/50 text-gray-500 dark:text-gray-400">
+                    <tr>
+                        <th class="px-4 py-2 text-center">#</th>
+                        <th class="px-4 py-2 text-left">종목</th>
+                        <th class="px-4 py-2 text-center">평가 수</th>
+                        <th class="px-4 py-2 text-center">적중률</th>
+                        <th class="px-4 py-2 text-center">방향 정확도</th>
+                        <th class="px-4 py-2 text-center">종합 점수</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
+                    {% for a in accuracy_scores %}
+                    <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/30" data-horizon="all">
+                        <td class="px-4 py-2 text-center text-gray-400">{{ loop.index }}</td>
+                        <td class="px-4 py-2 font-bold">
+                            <a href="/personal/{{ a.ticker }}/history" class="text-indigo-500 hover:underline">{{ a.ticker }}</a>
+                        </td>
+                        <td class="px-4 py-2 text-center">{{ a.total_evaluated }}</td>
+                        <td class="px-4 py-2 text-center">{{ "%.1f"|format(a.hit_rate * 100) }}%</td>
+                        <td class="px-4 py-2 text-center">{{ "%.1f"|format(a.direction_accuracy * 100) }}%</td>
+                        <td class="px-4 py-2 text-center font-bold
+                            {% if a.overall_score >= 0.7 %}text-green-600 dark:text-green-400
+                            {% elif a.overall_score >= 0.5 %}text-yellow-600 dark:text-yellow-400
+                            {% else %}text-red-600 dark:text-red-400{% endif %}">
+                            {{ "%.1f"|format(a.overall_score * 100) }}%
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- 시나리오별 히트율 -->
+    {% if scenario_summary %}
+    <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+        <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+            <h2 class="text-lg font-semibold">시나리오별 적중률</h2>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead class="bg-gray-50 dark:bg-gray-700/50 text-gray-500 dark:text-gray-400">
+                    <tr>
+                        <th class="px-4 py-2 text-left">시나리오</th>
+                        <th class="px-4 py-2 text-center">평가 수</th>
+                        <th class="px-4 py-2 text-center">적중률</th>
+                        <th class="px-4 py-2 text-center">평균 확률</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
+                    {% for scenario, stats in scenario_summary.items() %}
+                    <tr>
+                        <td class="px-4 py-2 font-bold">{{ scenario }}</td>
+                        <td class="px-4 py-2 text-center">{{ stats.count }}</td>
+                        <td class="px-4 py-2 text-center">
+                            {% if stats.count > 0 %}{{ "%.0f"|format(stats.hits / stats.count * 100) }}%{% else %}-{% endif %}
+                        </td>
+                        <td class="px-4 py-2 text-center">
+                            {% if stats.count > 0 %}{{ "%.0f"|format(stats.prob_sum / stats.count * 100) }}%{% else %}-{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    {% endif %}
+
+    <p class="text-center text-xs text-gray-400 dark:text-gray-500 mt-8">
+        * 투자 참고용이며 투자 권유가 아닙니다.
+    </p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{% if accuracy_scores %}
+<script>
+    accuracyBarChart('accuracyChart', {{ chart_data | safe }});
+
+    // 기간별 필터 (클라이언트 사이드)
+    document.querySelectorAll('[data-filter]').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            // 버튼 스타일 토글
+            document.querySelectorAll('[data-filter]').forEach(function(b) {
+                b.className = b.className.replace(/bg-indigo-100 text-indigo-700 dark:bg-indigo-900\/30 dark:text-indigo-400 font-medium/g, 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400');
+            });
+            btn.className = btn.className.replace(/bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400/g, 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400 font-medium');
+        });
+    });
+</script>
+{% endif %}
+{% endblock %}

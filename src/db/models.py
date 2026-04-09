@@ -786,3 +786,168 @@ class BridgeNewsStock(Base):
         Integer, ForeignKey("dim_stocks.stock_id", ondelete="CASCADE"), primary_key=True
     )
     relevance: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+
+
+# ──────────────────────────────────────────
+# Deep Dive 테이블 (워치리스트 + 개인 분석)
+# ──────────────────────────────────────────
+
+
+class DimWatchlist(TimestampMixin, Base):
+    """워치리스트 종목 관리 디멘션."""
+
+    __tablename__ = "dim_watchlist"
+    __table_args__ = (
+        Index("idx_watchlist_active", "active"),
+    )
+
+    watchlist_id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True
+    )
+    ticker: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
+    added_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class DimWatchlistHolding(TimestampMixin, Base):
+    """워치리스트 보유 정보 디멘션."""
+
+    __tablename__ = "dim_watchlist_holdings"
+
+    holding_id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True
+    )
+    ticker: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
+    avg_cost: Mapped[float] = mapped_column(Numeric, nullable=False)
+    shares: Mapped[int] = mapped_column(Integer, nullable=False)
+    opened_at: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+
+class DimWatchlistPair(TimestampMixin, Base):
+    """워치리스트 페어 종목 디멘션."""
+
+    __tablename__ = "dim_watchlist_pairs"
+    __table_args__ = (
+        UniqueConstraint("ticker", "peer_ticker", name="uq_watchlist_pair"),
+        Index("idx_pairs_ticker", "ticker"),
+    )
+
+    pair_id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True
+    )
+    ticker: Mapped[str] = mapped_column(String(20), nullable=False)
+    peer_ticker: Mapped[str] = mapped_column(String(20), nullable=False)
+    similarity_score: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+
+
+class FactDeepDiveReport(TimestampMixin, Base):
+    """Deep Dive 일별 분석 리포트 팩트 — 매일 새 row로 누적 (절대 덮어쓰지 않음)."""
+
+    __tablename__ = "fact_deepdive_reports"
+    __table_args__ = (
+        UniqueConstraint("stock_id", "date_id", name="uq_dd_reports_stock_date"),
+        Index("idx_dd_reports_ticker_date", "ticker", "date_id"),
+    )
+
+    report_id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True
+    )
+    date_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("dim_date.date_id"), nullable=False
+    )
+    stock_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("dim_stocks.stock_id", ondelete="CASCADE"), nullable=False
+    )
+    ticker: Mapped[str] = mapped_column(String(20), nullable=False)
+    action_grade: Mapped[str] = mapped_column(String(4), nullable=False)
+    conviction: Mapped[int] = mapped_column(Integer, nullable=False)
+    uncertainty: Mapped[str] = mapped_column(String(6), nullable=False)
+    report_json: Mapped[str] = mapped_column(Text, nullable=False)
+    # 레이어별 요약 (검색/필터용)
+    layer1_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    layer2_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    layer3_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    layer4_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    layer5_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    layer6_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # AI 토론 결과
+    ai_bull_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ai_bear_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ai_synthesis: Mapped[str | None] = mapped_column(Text, nullable=True)
+    consensus_strength: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    what_missing: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class FactDeepDiveForecast(TimestampMixin, Base):
+    """Deep Dive 시나리오 예측 팩트 — 정확도 측정용."""
+
+    __tablename__ = "fact_deepdive_forecasts"
+    __table_args__ = (
+        Index("idx_dd_forecasts_report", "report_id"),
+        Index("idx_dd_forecasts_ticker", "ticker", "horizon"),
+    )
+
+    forecast_id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True
+    )
+    report_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("fact_deepdive_reports.report_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    date_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    stock_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    ticker: Mapped[str] = mapped_column(String(20), nullable=False)
+    horizon: Mapped[str] = mapped_column(String(2), nullable=False)
+    scenario: Mapped[str] = mapped_column(String(4), nullable=False)
+    probability: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    price_low: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    price_high: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    trigger_condition: Mapped[str | None] = mapped_column(Text, nullable=True)
+    actual_price: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    actual_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    hit_range: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
+
+class FactDeepDiveAction(TimestampMixin, Base):
+    """Deep Dive 액션 등급 히스토리 팩트."""
+
+    __tablename__ = "fact_deepdive_actions"
+    __table_args__ = (
+        Index("idx_dd_actions_ticker", "ticker", "date_id"),
+    )
+
+    action_id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True
+    )
+    date_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    stock_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    ticker: Mapped[str] = mapped_column(String(20), nullable=False)
+    action_grade: Mapped[str] = mapped_column(String(4), nullable=False)
+    conviction: Mapped[int] = mapped_column(Integer, nullable=False)
+    prev_action_grade: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    prev_conviction: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class FactDeepDiveChange(TimestampMixin, Base):
+    """Deep Dive 일일 변경 감지 결과 팩트."""
+
+    __tablename__ = "fact_deepdive_changes"
+    __table_args__ = (
+        Index("idx_dd_changes_date", "date_id"),
+        Index("idx_dd_changes_ticker", "ticker", "date_id"),
+    )
+
+    change_id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True
+    )
+    date_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    stock_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    ticker: Mapped[str] = mapped_column(String(20), nullable=False)
+    change_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    severity: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="info"
+    )

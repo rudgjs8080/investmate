@@ -1095,6 +1095,166 @@ def _parse_date(date_str: str) -> date:
 
 
 # ──────────────────────────────────────────
+# watchlist — 개인 워치리스트 관리
+# ──────────────────────────────────────────
+
+
+@cli.group(help="개인 워치리스트 관리")
+def watchlist() -> None:
+    """워치리스트 CLI 그룹."""
+
+
+@watchlist.command("add", help="워치리스트에 종목 추가")
+@click.argument("ticker")
+@click.option("--shares", default=None, type=int, help="보유 수량")
+@click.option("--avg-cost", default=None, type=float, help="평균 매수가")
+def watchlist_add(ticker: str, shares: int | None, avg_cost: float | None) -> None:
+    """워치리스트에 종목을 추가한다."""
+    from src.db.migrate import ensure_schema
+    from src.db.repository import WatchlistRepository
+    from src.deepdive.watchlist_manager import ensure_stock_registered
+
+    settings = get_settings()
+    engine = create_db_engine(settings.db_path)
+    ensure_schema(engine)
+    init_db(engine)
+
+    with get_session(engine) as session:
+        WatchlistRepository.add_ticker(session, ticker)
+        ensure_stock_registered(session, ticker)
+        if shares is not None and avg_cost is not None:
+            WatchlistRepository.set_holding(session, ticker, shares, avg_cost)
+            console.print(
+                f"[green]{ticker.upper()} 추가 완료[/green] "
+                f"(보유: {shares}주 @ ${avg_cost:.2f})"
+            )
+        else:
+            console.print(f"[green]{ticker.upper()} 추가 완료[/green]")
+
+
+@watchlist.command("remove", help="워치리스트에서 종목 제거")
+@click.argument("ticker")
+def watchlist_remove(ticker: str) -> None:
+    """워치리스트에서 종목을 제거한다 (soft delete)."""
+    from src.db.migrate import ensure_schema
+    from src.db.repository import WatchlistRepository
+
+    settings = get_settings()
+    engine = create_db_engine(settings.db_path)
+    ensure_schema(engine)
+    init_db(engine)
+
+    with get_session(engine) as session:
+        removed = WatchlistRepository.remove_ticker(session, ticker)
+    if removed:
+        console.print(f"[yellow]{ticker.upper()} 제거 완료[/yellow]")
+    else:
+        console.print(f"[red]{ticker.upper()} 을(를) 찾을 수 없습니다[/red]")
+
+
+@watchlist.command("list", help="워치리스트 조회")
+def watchlist_list() -> None:
+    """워치리스트를 표시한다."""
+    from src.db.migrate import ensure_schema
+    from src.db.repository import WatchlistRepository
+
+    settings = get_settings()
+    engine = create_db_engine(settings.db_path)
+    ensure_schema(engine)
+    init_db(engine)
+
+    with get_session(engine) as session:
+        items = WatchlistRepository.get_active(session)
+        holdings = WatchlistRepository.get_all_holdings(session)
+
+    if not items:
+        console.print("[dim]워치리스트가 비어 있습니다[/dim]")
+        return
+
+    table = Table(title="워치리스트")
+    table.add_column("티커", style="bold")
+    table.add_column("보유")
+    table.add_column("추가일")
+
+    for item in items:
+        holding = holdings.get(item.ticker)
+        if holding:
+            h_str = f"{holding.shares}주 @ ${float(holding.avg_cost):.2f}"
+        else:
+            h_str = "-"
+        added = item.added_at.strftime("%Y-%m-%d") if item.added_at else "-"
+        table.add_row(item.ticker, h_str, added)
+
+    console.print(table)
+
+
+@watchlist.command("set-holding", help="보유 정보 설정")
+@click.argument("ticker")
+@click.option("--shares", required=True, type=int, help="보유 수량")
+@click.option("--avg-cost", required=True, type=float, help="평균 매수가")
+@click.option("--opened-at", default=None, help="매수일 (YYYY-MM-DD)")
+def watchlist_set_holding(
+    ticker: str, shares: int, avg_cost: float, opened_at: str | None,
+) -> None:
+    """보유 정보를 설정/갱신한다."""
+    from src.db.migrate import ensure_schema
+    from src.db.repository import WatchlistRepository
+
+    settings = get_settings()
+    engine = create_db_engine(settings.db_path)
+    ensure_schema(engine)
+    init_db(engine)
+
+    opened = _parse_date(opened_at) if opened_at else None
+    with get_session(engine) as session:
+        WatchlistRepository.set_holding(session, ticker, shares, avg_cost, opened)
+    console.print(
+        f"[green]{ticker.upper()} 보유정보 설정[/green]: "
+        f"{shares}주 @ ${avg_cost:.2f}"
+    )
+
+
+# ──────────────────────────────────────────
+# deepdive — Deep Dive 개인 분석
+# ──────────────────────────────────────────
+
+
+@cli.group(help="Deep Dive 개인 분석")
+def deepdive() -> None:
+    """Deep Dive CLI 그룹."""
+
+
+@deepdive.command("run", help="Deep Dive 파이프라인 실행")
+@click.option("--date", "run_date", default=None, help="분석 날짜 (YYYY-MM-DD)")
+@click.option("--ticker", default=None, help="특정 종목만 분석")
+@click.option("--force", is_flag=True, help="체크포인트 무시 재실행")
+@click.option("--skip-notify", is_flag=True, help="알림 스킵")
+def deepdive_run(
+    run_date: str | None, ticker: str | None, force: bool, skip_notify: bool,
+) -> None:
+    """Deep Dive 파이프라인을 실행한다."""
+    from src.db.migrate import ensure_schema
+    from src.deepdive_pipeline import DeepDivePipeline
+
+    target_date = _parse_date(run_date) if run_date else date.today()
+    _setup_logging(target_date)
+
+    settings = get_settings()
+    engine = create_db_engine(settings.db_path)
+    ensure_schema(engine)
+    init_db(engine)
+
+    pipeline = DeepDivePipeline(
+        engine=engine,
+        target_date=target_date,
+        ticker=ticker,
+        force=force,
+        skip_notify=skip_notify,
+    )
+    pipeline.run()
+
+
+# ──────────────────────────────────────────
 # db backfill — 데이터 백필
 # ──────────────────────────────────────────
 @db.command("backfill-macro", help="매크로 히스토리 백필 (VIX/금리/달러/S&P500)")

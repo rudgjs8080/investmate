@@ -101,6 +101,47 @@ def send_weekly_summary(
         return False
 
 
+def send_deepdive_summary(
+    run_date: date,
+    stock_count: int,
+    action_summary: dict[str, int],
+    failed_count: int = 0,
+    channel: str | None = None,
+    action_changes: list[str] | None = None,
+    new_risks: list[str] | None = None,
+) -> bool:
+    """Deep dive 완료 알림 (변경 감지 포함)."""
+    if not channel:
+        logger.info("알림 채널 미설정, 스킵")
+        return False
+
+    actions_str = ", ".join(f"{k} {v}건" for k, v in sorted(action_summary.items()) if v > 0)
+    fail_str = f", 실패 {failed_count}건" if failed_count > 0 else ""
+    message = (
+        f"[Investmate] Deep dive 완료: {stock_count}종목 분석"
+        + (f", {actions_str}" if actions_str else "")
+        + fail_str
+    )
+    if action_changes:
+        message += f"\n액션 변경 {len(action_changes)}건:"
+        for c in action_changes[:5]:
+            message += f"\n  - {c}"
+    if new_risks:
+        message += f"\n신규 리스크 {len(new_risks)}건:"
+        for r in new_risks[:5]:
+            message += f"\n  - {r}"
+
+    if channel == "telegram":
+        return _send_telegram(message)
+    elif channel == "slack":
+        return _send_slack(message)
+    elif channel == "email":
+        return _send_email(message, run_date)
+    else:
+        logger.warning("알 수 없는 알림 채널: %s", channel)
+        return False
+
+
 def _send_telegram(message: str) -> bool:
     """텔레그램 봇으로 메시지를 전송한다."""
     from src.config import get_settings

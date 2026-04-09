@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+
+{% block title %}{{ ticker }} 히스토리{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+    <!-- Breadcrumb -->
+    <nav class="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 mb-6">
+        <a href="/personal" class="hover:text-indigo-500">개인 분석</a>
+        <span>/</span>
+        <a href="/personal/{{ ticker }}" class="hover:text-indigo-500">{{ ticker }}{% if stock %} ({{ stock.name }}){% endif %}</a>
+        <span>/</span>
+        <span class="text-gray-900 dark:text-gray-100 font-medium">히스토리</span>
+    </nav>
+
+    <h1 class="text-2xl font-bold mb-6">{{ ticker }} 분석 히스토리</h1>
+
+    {% if not actions %}
+    <div class="bg-white dark:bg-gray-800 rounded-xl p-12 text-center border border-gray-200 dark:border-gray-700">
+        <p class="text-gray-500 dark:text-gray-400 text-lg">아직 분석 이력이 없습니다.</p>
+        <p class="text-gray-400 dark:text-gray-500 mt-2 text-sm">파이프라인을 먼저 실행하세요.</p>
+    </div>
+    {% else %}
+
+    <!-- 액션 타임라인 차트 -->
+    {% if timeline_data %}
+    <div class="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700 mb-6">
+        <h2 class="text-lg font-semibold mb-3">확신도 추이 + 등급 변경</h2>
+        <div id="timelineChart" class="chart-md"></div>
+    </div>
+    {% endif %}
+
+    <!-- 분석 이력 -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 mb-6 overflow-hidden">
+        <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+            <h2 class="text-lg font-semibold">분석 이력</h2>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead class="bg-gray-50 dark:bg-gray-700/50 text-gray-500 dark:text-gray-400">
+                    <tr>
+                        <th class="px-4 py-2 text-left">날짜</th>
+                        <th class="px-4 py-2 text-center">등급</th>
+                        <th class="px-4 py-2 text-center">확신도</th>
+                        <th class="px-4 py-2 text-left">이전</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
+                    {% for a in actions %}
+                    <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/30">
+                        <td class="px-4 py-2">{{ id_to_date(a.date_id).isoformat() }}</td>
+                        <td class="px-4 py-2 text-center">
+                            <span class="px-2 py-0.5 rounded text-xs font-bold
+                                {% if a.action_grade == 'ADD' %}bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400
+                                {% elif a.action_grade == 'TRIM' %}bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400
+                                {% elif a.action_grade == 'EXIT' %}bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400
+                                {% else %}bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300{% endif %}">
+                                {{ a.action_grade }}
+                            </span>
+                        </td>
+                        <td class="px-4 py-2 text-center font-mono">{{ a.conviction }}/10</td>
+                        <td class="px-4 py-2 text-gray-500 dark:text-gray-400">
+                            {% if a.prev_action_grade %}
+                            {{ a.prev_action_grade }} ({{ a.prev_conviction or '-' }})
+                            {% else %}-{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- 변경 이력 -->
+    {% if changes %}
+    <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 mb-6 overflow-hidden">
+        <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+            <h2 class="text-lg font-semibold">변경 이력</h2>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead class="bg-gray-50 dark:bg-gray-700/50 text-gray-500 dark:text-gray-400">
+                    <tr>
+                        <th class="px-4 py-2 text-left">날짜</th>
+                        <th class="px-4 py-2 text-center">유형</th>
+                        <th class="px-4 py-2 text-left">설명</th>
+                        <th class="px-4 py-2 text-center">심각도</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
+                    {% for c in changes %}
+                    <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/30">
+                        <td class="px-4 py-2">{{ id_to_date(c.date_id).isoformat() }}</td>
+                        <td class="px-4 py-2 text-center text-xs font-mono">{{ c.change_type }}</td>
+                        <td class="px-4 py-2">{{ c.description }}</td>
+                        <td class="px-4 py-2 text-center">
+                            <span class="px-2 py-0.5 rounded text-xs font-medium
+                                {% if c.severity == 'critical' %}bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400
+                                {% elif c.severity == 'warning' %}bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400
+                                {% else %}bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400{% endif %}">
+                                {{ c.severity }}
+                            </span>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- 시나리오 정확도 -->
+    {% if evaluated_forecasts %}
+    <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+        <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+            <h2 class="text-lg font-semibold">시나리오 예측 정확도</h2>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead class="bg-gray-50 dark:bg-gray-700/50 text-gray-500 dark:text-gray-400">
+                    <tr>
+                        <th class="px-4 py-2 text-left">날짜</th>
+                        <th class="px-4 py-2 text-center">기간</th>
+                        <th class="px-4 py-2 text-center">시나리오</th>
+                        <th class="px-4 py-2 text-right">예측 범위</th>
+                        <th class="px-4 py-2 text-right">실제 가격</th>
+                        <th class="px-4 py-2 text-center">적중</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
+                    {% for f in evaluated_forecasts %}
+                    <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/30">
+                        <td class="px-4 py-2">{{ id_to_date(f.date_id).isoformat() }}</td>
+                        <td class="px-4 py-2 text-center font-mono">{{ f.horizon }}</td>
+                        <td class="px-4 py-2 text-center">{{ f.scenario }}</td>
+                        <td class="px-4 py-2 text-right font-mono">${{ "%.2f"|format(f.price_low) }} - ${{ "%.2f"|format(f.price_high) }}</td>
+                        <td class="px-4 py-2 text-right font-mono">${{ "%.2f"|format(f.actual_price) }}</td>
+                        <td class="px-4 py-2 text-center">
+                            {% if f.hit_range %}
+                            <span class="text-green-600 dark:text-green-400 font-bold">O</span>
+                            {% else %}
+                            <span class="text-red-500 dark:text-red-400 font-bold">X</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+{% if timeline_data %}
+<script>
+    actionTimelineChart('timelineChart', {{ timeline_data | safe }});
+</script>
+{% endif %}
+{% endblock %}

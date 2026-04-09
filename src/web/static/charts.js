@@ -528,6 +528,139 @@ function gaugeChartOption(value, rating, opts) {
 
 // ─── 글로벌 디바운스 리사이즈 (단일 핸들러) ────────────────
 
+// ─── Deep Dive 전용 차트 ────────────────────────────────
+
+function layerRadarChart(domId, scores) {
+    var chart = initChart(domId);
+    if (!chart) return;
+    var labels = ['펀더멘털', '밸류에이션', '기술적', '수급', '내러티브', '매크로'];
+    var keys = ['fundamental', 'valuation', 'technical', 'flow', 'narrative', 'macro'];
+    var values = keys.map(function(k) { return scores[k] || 5; });
+    chart.setOption(radarChartOption(labels, values, COLORS.primary, 10));
+}
+
+function scenarioRangeChart(domId, data) {
+    var chart = initChart(domId);
+    if (!chart || !data || !data.horizons || data.horizons.length === 0) return;
+    var horizons = data.horizons;
+    var categories = horizons.map(function(h) { return h.label; });
+    var colors = { bear: '#ef4444', base: '#6366f1', bull: '#22c55e' };
+
+    var series = ['bear', 'base', 'bull'].map(function(sc) {
+        return {
+            name: sc.charAt(0).toUpperCase() + sc.slice(1),
+            type: 'bar',
+            barWidth: 18,
+            itemStyle: { color: colorWithAlpha(colors[sc], 0.7), borderRadius: 3 },
+            data: horizons.map(function(h) {
+                var s = h[sc];
+                if (!s) return [0, 0];
+                return [s.low, s.high];
+            }),
+        };
+    });
+
+    chart.setOption({
+        tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+        legend: { data: ['Bear', 'Base', 'Bull'], top: 5, textStyle: { fontSize: 11 } },
+        grid: { left: 50, right: 30, top: 40, bottom: 30 },
+        xAxis: { type: 'value', axisLabel: { formatter: function(v) { return '$' + fmtCompact(v); } } },
+        yAxis: { type: 'category', data: categories, axisLabel: { fontSize: 12, fontWeight: 600 } },
+        series: series,
+        markLine: data.currentPrice ? {
+            silent: true, symbol: 'none',
+            data: [{ xAxis: data.currentPrice, label: { formatter: '현재가', fontSize: 10 }, lineStyle: { color: '#666', type: 'dashed' } }],
+        } : undefined,
+    });
+}
+
+// ─── Deep Dive Phase 3 차트 ─────────────────────────────────
+
+/**
+ * 액션 타임라인 차트 — conviction 추이 + 등급 변경 마커
+ * @param {string} domId
+ * @param {{dates: string[], convictions: number[], grades: string[]}} data
+ */
+function actionTimelineChart(domId, data) {
+    var chart = initChart(domId);
+    if (!chart || !data || !data.dates || !data.dates.length) return chart;
+
+    var GRADE_COLORS = { ADD: '#10b981', HOLD: '#6b7280', TRIM: '#f59e0b', EXIT: '#ef4444' };
+
+    // 등급 변경 시점 마커 데이터
+    var markPoints = [];
+    for (var i = 0; i < data.grades.length; i++) {
+        if (i === 0 || data.grades[i] !== data.grades[i - 1]) {
+            markPoints.push({
+                coord: [data.dates[i], data.convictions[i]],
+                value: data.grades[i],
+                itemStyle: { color: GRADE_COLORS[data.grades[i]] || '#6b7280' },
+                symbol: 'diamond', symbolSize: 14,
+            });
+        }
+    }
+
+    chart.setOption({
+        tooltip: {
+            trigger: 'axis',
+            formatter: function(params) {
+                var p = params[0];
+                var idx = p.dataIndex;
+                var grade = data.grades[idx] || '-';
+                return fmtDate(p.axisValue) + '<br>'
+                    + '<span style="color:' + (GRADE_COLORS[grade] || '#666') + '">● ' + grade + '</span>'
+                    + ' | 확신도: ' + p.value;
+            },
+        },
+        xAxis: { type: 'category', data: data.dates, axisLabel: { formatter: fmtDate } },
+        yAxis: { type: 'value', min: 1, max: 10, name: '확신도' },
+        series: [{
+            type: 'line', data: data.convictions, smooth: true,
+            lineStyle: { color: '#6366f1', width: 2 },
+            itemStyle: { color: '#6366f1' },
+            areaStyle: { color: colorWithAlpha('#6366f1', 0.08) },
+            markPoint: { data: markPoints, label: { show: true, fontSize: 10, formatter: '{c}' } },
+        }],
+        dataZoom: data.dates.length > 60 ? [{ type: 'slider', start: 50, end: 100 }] : undefined,
+    });
+    return chart;
+}
+
+/**
+ * 정확도 바 차트 — 종목별 hit_rate / direction / overall 비교
+ * @param {string} domId
+ * @param {Array<{ticker: string, hit_rate: number, direction: number, overall: number}>} data
+ */
+function accuracyBarChart(domId, data) {
+    var chart = initChart(domId);
+    if (!chart || !data || !data.length) return chart;
+
+    var tickers = data.map(function(d) { return d.ticker; });
+
+    chart.setOption({
+        tooltip: {
+            trigger: 'axis', axisPointer: { type: 'shadow' },
+            formatter: function(params) {
+                var label = params[0].axisValue;
+                var lines = [label];
+                params.forEach(function(p) {
+                    lines.push(p.marker + ' ' + p.seriesName + ': ' + fmtNum(p.value, 1) + '%');
+                });
+                return lines.join('<br>');
+            },
+        },
+        legend: { data: ['적중률', '방향 정확도', '종합 점수'] },
+        yAxis: { type: 'category', data: tickers, inverse: true },
+        xAxis: { type: 'value', min: 0, max: 100, axisLabel: { formatter: '{value}%' } },
+        series: [
+            { name: '적중률', type: 'bar', data: data.map(function(d) { return d.hit_rate; }), itemStyle: { color: '#3b82f6' } },
+            { name: '방향 정확도', type: 'bar', data: data.map(function(d) { return d.direction; }), itemStyle: { color: '#10b981' } },
+            { name: '종합 점수', type: 'bar', data: data.map(function(d) { return d.overall; }), itemStyle: { color: '#8b5cf6' } },
+        ],
+    });
+    return chart;
+}
+
 var _resizeTimer;
 window.addEventListener('resize', function() {
     clearTimeout(_resizeTimer);

@@ -53,6 +53,7 @@ def create_app() -> FastAPI:
     from src.web.routes.portfolio import router as portfolio_router
     from src.web.routes.weekly_report import router as weekly_router
     from src.web.routes.factors import router as factors_router
+    from src.web.routes.personal import router as personal_router
 
     app.include_router(dashboard_router)
     app.include_router(api_router, prefix="/api")
@@ -68,5 +69,6 @@ def create_app() -> FastAPI:
     app.include_router(portfolio_router)
     app.include_router(weekly_router)
     app.include_router(factors_router)
+    app.include_router(personal_router)
 
     return app

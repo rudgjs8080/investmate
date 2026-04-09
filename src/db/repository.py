@@ -16,10 +16,17 @@ from src.db.models import (
     DimSector,
     DimSignalType,
     DimStock,
+    DimWatchlist,
+    DimWatchlistHolding,
+    DimWatchlistPair,
     FactAnalystConsensus,
     FactCollectionLog,
     FactDailyPrice,
     FactDailyRecommendation,
+    FactDeepDiveAction,
+    FactDeepDiveChange,
+    FactDeepDiveForecast,
+    FactDeepDiveReport,
     FactEarningsSurprise,
     FactFinancial,
     FactIndicatorValue,
@@ -783,4 +790,421 @@ class FactorReturnRepository:
         if start_date_id is not None:
             stmt = stmt.where(FactFactorReturn.date_id >= start_date_id)
         stmt = stmt.order_by(FactFactorReturn.date_id, FactFactorReturn.factor_name)
+        return list(session.execute(stmt).scalars().all())
+
+
+# ──────────────────────────────────────────
+# Deep Dive — 워치리스트 + 개인 분석
+# ──────────────────────────────────────────
+
+
+class WatchlistRepository:
+    """워치리스트 CRUD."""
+
+    @staticmethod
+    def add_ticker(
+        session: Session, ticker: str, note: str | None = None,
+    ) -> DimWatchlist:
+        """워치리스트에 종목 추가. 이미 존재하면 재활성화."""
+        ticker = ticker.upper()
+        existing = session.execute(
+            select(DimWatchlist).where(DimWatchlist.ticker == ticker)
+        ).scalar_one_or_none()
+        if existing is not None:
+            existing.active = True
+            if note is not None:
+                existing.note = note
+            session.flush()
+            return existing
+        item = DimWatchlist(ticker=ticker, active=True, note=note)
+        session.add(item)
+        session.flush()
+        return item
+
+    @staticmethod
+    def remove_ticker(session: Session, ticker: str) -> bool:
+        """soft delete (active=False). 존재하지 않으면 False."""
+        ticker = ticker.upper()
+        item = session.execute(
+            select(DimWatchlist).where(DimWatchlist.ticker == ticker)
+        ).scalar_one_or_none()
+        if item is None:
+            return False
+        item.active = False
+        session.flush()
+        return True
+
+    @staticmethod
+    def get_active(session: Session) -> list[DimWatchlist]:
+        """active=True인 종목 리스트 (ticker 정렬)."""
+        stmt = (
+            select(DimWatchlist)
+            .where(DimWatchlist.active.is_(True))
+            .order_by(DimWatchlist.ticker)
+        )
+        return list(session.execute(stmt).scalars().all())
+
+    @staticmethod
+    def set_holding(
+        session: Session,
+        ticker: str,
+        shares: int,
+        avg_cost: float,
+        opened_at: date | None = None,
+    ) -> DimWatchlistHolding:
+        """보유정보 UPSERT."""
+        ticker = ticker.upper()
+        existing = session.execute(
+            select(DimWatchlistHolding).where(DimWatchlistHolding.ticker == ticker)
+        ).scalar_one_or_none()
+        if existing is not None:
+            existing.shares = shares
+            existing.avg_cost = avg_cost
+            if opened_at is not None:
+                existing.opened_at = opened_at
+            session.flush()
+            return existing
+        holding = DimWatchlistHolding(
+            ticker=ticker, shares=shares, avg_cost=avg_cost, opened_at=opened_at,
+        )
+        session.add(holding)
+        session.flush()
+        return holding
+
+    @staticmethod
+    def get_holding(session: Session, ticker: str) -> DimWatchlistHolding | None:
+        """종목별 보유정보 조회."""
+        stmt = select(DimWatchlistHolding).where(
+            DimWatchlistHolding.ticker == ticker.upper()
+        )
+        return session.execute(stmt).scalar_one_or_none()
+
+    @staticmethod
+    def get_all_holdings(session: Session) -> dict[str, DimWatchlistHolding]:
+        """{ticker: holding} 매핑."""
+        stmt = select(DimWatchlistHolding)
+        holdings = session.execute(stmt).scalars().all()
+        return {h.ticker: h for h in holdings}
+
+    @staticmethod
+    def upsert_pairs(
+        session: Session, ticker: str, pairs: list[dict],
+    ) -> int:
+        """페어 종목 UPSERT. 기존 pairs 삭제 후 재삽입. 반환: INSERT 건수."""
+        from sqlalchemy import delete
+
+        ticker = ticker.upper()
+        session.execute(
+            delete(DimWatchlistPair).where(DimWatchlistPair.ticker == ticker)
+        )
+        for p in pairs:
+            session.add(DimWatchlistPair(
+                ticker=ticker,
+                peer_ticker=p["peer_ticker"].upper(),
+                similarity_score=p.get("similarity_score"),
+            ))
+        session.flush()
+        return len(pairs)
+
+    @staticmethod
+    def get_pairs(session: Session, ticker: str) -> list[DimWatchlistPair]:
+        """종목의 페어 목록. ORDER BY similarity_score DESC."""
+        stmt = (
+            select(DimWatchlistPair)
+            .where(DimWatchlistPair.ticker == ticker.upper())
+            .order_by(DimWatchlistPair.similarity_score.desc())
+        )
+        return list(session.execute(stmt).scalars().all())
+
+    @staticmethod
+    def get_pairs_updated_at(session: Session, ticker: str) -> datetime | None:
+        """종목 페어의 최신 updated_at. 없으면 None."""
+        from sqlalchemy import func as sa_func
+
+        stmt = (
+            select(sa_func.max(DimWatchlistPair.updated_at))
+            .where(DimWatchlistPair.ticker == ticker.upper())
+        )
+        return session.execute(stmt).scalar_one_or_none()
+
+
+class DeepDiveRepository:
+    """Deep Dive 보고서 저장/조회."""
+
+    @staticmethod
+    def insert_report(session: Session, **kwargs) -> FactDeepDiveReport:
+        """보고서 INSERT (절대 UPDATE 아님)."""
+        report = FactDeepDiveReport(**kwargs)
+        session.add(report)
+        session.flush()
+        return report
+
+    @staticmethod
+    def insert_action(session: Session, **kwargs) -> FactDeepDiveAction:
+        """액션 이력 INSERT."""
+        action = FactDeepDiveAction(**kwargs)
+        session.add(action)
+        session.flush()
+        return action
+
+    @staticmethod
+    def get_latest_report(
+        session: Session, stock_id: int,
+    ) -> FactDeepDiveReport | None:
+        """종목의 최신 보고서."""
+        stmt = (
+            select(FactDeepDiveReport)
+            .where(FactDeepDiveReport.stock_id == stock_id)
+            .order_by(FactDeepDiveReport.date_id.desc())
+            .limit(1)
+        )
+        return session.execute(stmt).scalar_one_or_none()
+
+    @staticmethod
+    def get_latest_reports_all(session: Session) -> list[FactDeepDiveReport]:
+        """전 종목 최신 보고서 (카드 그리드용)."""
+        from sqlalchemy import func as sa_func
+
+        # 종목별 max(date_id) subquery
+        sub = (
+            select(
+                FactDeepDiveReport.stock_id,
+                sa_func.max(FactDeepDiveReport.date_id).label("max_date_id"),
+            )
+            .group_by(FactDeepDiveReport.stock_id)
+            .subquery()
+        )
+        stmt = (
+            select(FactDeepDiveReport)
+            .join(
+                sub,
+                (FactDeepDiveReport.stock_id == sub.c.stock_id)
+                & (FactDeepDiveReport.date_id == sub.c.max_date_id),
+            )
+            .order_by(FactDeepDiveReport.ticker)
+        )
+        return list(session.execute(stmt).scalars().all())
+
+    @staticmethod
+    def get_reports_by_ticker(
+        session: Session, ticker: str, limit: int = 30,
+    ) -> list[FactDeepDiveReport]:
+        """종목별 보고서 이력."""
+        stmt = (
+            select(FactDeepDiveReport)
+            .where(FactDeepDiveReport.ticker == ticker.upper())
+            .order_by(FactDeepDiveReport.date_id.desc())
+            .limit(limit)
+        )
+        return list(session.execute(stmt).scalars().all())
+
+    @staticmethod
+    def delete_reports_for_date(
+        session: Session, date_id: int, stock_id: int | None = None,
+    ) -> int:
+        """force 재실행 시 기존 보고서/액션 삭제. 반환: 삭제 건수."""
+        from sqlalchemy import delete
+
+        report_stmt = delete(FactDeepDiveReport).where(
+            FactDeepDiveReport.date_id == date_id
+        )
+        action_stmt = delete(FactDeepDiveAction).where(
+            FactDeepDiveAction.date_id == date_id
+        )
+        if stock_id is not None:
+            report_stmt = report_stmt.where(FactDeepDiveReport.stock_id == stock_id)
+            action_stmt = action_stmt.where(FactDeepDiveAction.stock_id == stock_id)
+
+        r1 = session.execute(report_stmt)
+        r2 = session.execute(action_stmt)
+        session.flush()
+        return (r1.rowcount or 0) + (r2.rowcount or 0)
+
+    @staticmethod
+    def insert_forecasts_batch(
+        session: Session,
+        report_id: int,
+        date_id: int,
+        stock_id: int,
+        ticker: str,
+        forecasts: list,
+    ) -> int:
+        """시나리오 예측 일괄 INSERT. 반환: INSERT 건수."""
+        count = 0
+        for f in forecasts:
+            session.add(FactDeepDiveForecast(
+                report_id=report_id,
+                date_id=date_id,
+                stock_id=stock_id,
+                ticker=ticker,
+                horizon=f.horizon,
+                scenario=f.scenario,
+                probability=float(f.probability),
+                price_low=float(f.price_low),
+                price_high=float(f.price_high),
+                trigger_condition=f.trigger_condition,
+            ))
+            count += 1
+        session.flush()
+        return count
+
+    @staticmethod
+    def get_forecasts_by_report(
+        session: Session, report_id: int,
+    ) -> list[FactDeepDiveForecast]:
+        """보고서별 시나리오 예측 조회."""
+        stmt = (
+            select(FactDeepDiveForecast)
+            .where(FactDeepDiveForecast.report_id == report_id)
+            .order_by(FactDeepDiveForecast.horizon, FactDeepDiveForecast.scenario)
+        )
+        return list(session.execute(stmt).scalars().all())
+
+    # --- T3: diff/changes ---
+
+    @staticmethod
+    def get_previous_report(
+        session: Session, stock_id: int, before_date_id: int,
+    ) -> FactDeepDiveReport | None:
+        """지정 date_id 이전의 최신 리포트. diff 감지용."""
+        stmt = (
+            select(FactDeepDiveReport)
+            .where(
+                FactDeepDiveReport.stock_id == stock_id,
+                FactDeepDiveReport.date_id < before_date_id,
+            )
+            .order_by(FactDeepDiveReport.date_id.desc())
+            .limit(1)
+        )
+        return session.execute(stmt).scalar_one_or_none()
+
+    @staticmethod
+    def insert_changes_batch(
+        session: Session, date_id: int, stock_id: int, ticker: str,
+        changes: list,
+    ) -> int:
+        """변경 감지 결과 일괄 INSERT. 반환: INSERT 건수."""
+        for c in changes:
+            session.add(FactDeepDiveChange(
+                date_id=date_id,
+                stock_id=stock_id,
+                ticker=ticker.upper(),
+                change_type=c.change_type,
+                description=c.description,
+                severity=c.severity,
+            ))
+        session.flush()
+        return len(changes)
+
+    @staticmethod
+    def get_changes_by_date(
+        session: Session, date_id: int,
+    ) -> list[FactDeepDiveChange]:
+        """날짜별 변경 목록 (알림용). ORDER BY severity DESC."""
+        severity_order = {"critical": 0, "warning": 1, "info": 2}
+        stmt = (
+            select(FactDeepDiveChange)
+            .where(FactDeepDiveChange.date_id == date_id)
+        )
+        results = list(session.execute(stmt).scalars().all())
+        results.sort(key=lambda c: severity_order.get(c.severity, 9))
+        return results
+
+    @staticmethod
+    def get_changes_by_ticker(
+        session: Session, ticker: str, limit: int = 60,
+    ) -> list[FactDeepDiveChange]:
+        """종목별 변경 이력 (히스토리 페이지용). ORDER BY date_id DESC."""
+        stmt = (
+            select(FactDeepDiveChange)
+            .where(FactDeepDiveChange.ticker == ticker.upper())
+            .order_by(FactDeepDiveChange.date_id.desc())
+            .limit(limit)
+        )
+        return list(session.execute(stmt).scalars().all())
+
+    # --- T4: forecast 평가 ---
+
+    @staticmethod
+    def get_matured_forecasts(
+        session: Session, as_of_date: date,
+    ) -> list[FactDeepDiveForecast]:
+        """만기 도래한 미평가 예측 조회. Python에서 만기 필터링."""
+        from datetime import timedelta
+
+        from src.db.helpers import id_to_date
+
+        HORIZON_DAYS = {"1M": 30, "3M": 90, "6M": 180}
+
+        all_pending = list(session.execute(
+            select(FactDeepDiveForecast)
+            .where(FactDeepDiveForecast.actual_price.is_(None))
+        ).scalars().all())
+
+        matured = []
+        for f in all_pending:
+            forecast_date = id_to_date(f.date_id)
+            maturity_date = forecast_date + timedelta(
+                days=HORIZON_DAYS.get(f.horizon, 30),
+            )
+            if maturity_date <= as_of_date:
+                matured.append(f)
+        return matured
+
+    @staticmethod
+    def update_forecast_actual(
+        session: Session, forecast_id: int,
+        actual_price: float, actual_date: date, hit_range: bool,
+    ) -> None:
+        """만기 도래 예측의 실제 가격/적중 여부 업데이트."""
+        stmt = (
+            select(FactDeepDiveForecast)
+            .where(FactDeepDiveForecast.forecast_id == forecast_id)
+        )
+        forecast = session.execute(stmt).scalar_one()
+        forecast.actual_price = actual_price
+        forecast.actual_date = actual_date
+        forecast.hit_range = hit_range
+        session.flush()
+
+    @staticmethod
+    def get_all_evaluated_forecasts(
+        session: Session,
+    ) -> list[FactDeepDiveForecast]:
+        """평가 완료된 전체 예측 (리더보드용)."""
+        stmt = (
+            select(FactDeepDiveForecast)
+            .where(FactDeepDiveForecast.hit_range.isnot(None))
+            .order_by(FactDeepDiveForecast.ticker, FactDeepDiveForecast.horizon)
+        )
+        return list(session.execute(stmt).scalars().all())
+
+    @staticmethod
+    def get_evaluated_forecasts_by_ticker(
+        session: Session, ticker: str,
+    ) -> list[FactDeepDiveForecast]:
+        """종목별 평가 완료 예측."""
+        stmt = (
+            select(FactDeepDiveForecast)
+            .where(
+                FactDeepDiveForecast.hit_range.isnot(None),
+                FactDeepDiveForecast.ticker == ticker.upper(),
+            )
+            .order_by(FactDeepDiveForecast.horizon)
+        )
+        return list(session.execute(stmt).scalars().all())
+
+    # --- T5: actions 조회 ---
+
+    @staticmethod
+    def get_actions_by_ticker(
+        session: Session, ticker: str, limit: int = 60,
+    ) -> list[FactDeepDiveAction]:
+        """종목별 액션 이력 (히스토리 페이지용). ORDER BY date_id DESC LIMIT :limit."""
+        stmt = (
+            select(FactDeepDiveAction)
+            .where(FactDeepDiveAction.ticker == ticker.upper())
+            .order_by(FactDeepDiveAction.date_id.desc())
+            .limit(limit)
+        )
         return list(session.execute(stmt).scalars().all())

@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+
+{% block title %}개인 분석 — Investmate{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto">
+    <!-- 헤더 -->
+    <div class="flex items-center justify-between mb-6">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Deep Dive 개인 분석</h1>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">워치리스트 {{ stock_count }}종목</p>
+        </div>
+        <a href="/personal/forecasts" class="text-sm text-indigo-500 hover:underline font-medium">예측 정확도 &rarr;</a>
+    </div>
+
+    {% if cards %}
+    <!-- 카드 그리드 -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        {% for card in cards %}
+        <a href="/personal/{{ card.ticker }}" class="relative block bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 hover:shadow-md transition hover:border-indigo-300 dark:hover:border-indigo-600">
+            {% if card.change_count and card.change_count > 0 %}
+            <span class="absolute top-2 right-2 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center font-bold">{{ card.change_count }}</span>
+            {% endif %}
+            <!-- 티커 + 종목명 -->
+            <div class="flex items-start justify-between mb-3">
+                <div>
+                    <span class="text-lg font-bold text-gray-900 dark:text-white">{{ card.ticker }}</span>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[140px]">{{ card.name }}</p>
+                </div>
+                {% if card.has_report %}
+                <!-- 액션 배지 -->
+                {% if card.action_grade == 'ADD' %}
+                <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">ADD</span>
+                {% elif card.action_grade == 'TRIM' %}
+                <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400">TRIM</span>
+                {% elif card.action_grade == 'EXIT' %}
+                <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">EXIT</span>
+                {% else %}
+                <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400">HOLD</span>
+                {% endif %}
+                {% endif %}
+            </div>
+
+            <!-- 현재가 + 일간 변화 -->
+            <div class="flex items-baseline gap-2 mb-3">
+                <span class="text-xl font-semibold text-gray-900 dark:text-white">
+                    {% if card.current_price > 0 %}${{ "%.2f"|format(card.current_price) }}{% else %}-{% endif %}
+                </span>
+                {% if card.current_price > 0 %}
+                <span class="text-sm font-medium {% if card.daily_change >= 0 %}text-green-600 dark:text-green-400{% else %}text-red-600 dark:text-red-400{% endif %}">
+                    {{ "%+.2f"|format(card.daily_change) }}%
+                </span>
+                {% endif %}
+            </div>
+
+            {% if card.has_report %}
+            <!-- Conviction 바 -->
+            <div class="mb-3">
+                <div class="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 mb-1">
+                    <span>확신도</span>
+                    <span>{{ card.conviction }}/10</span>
+                </div>
+                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                    <div class="h-2 rounded-full transition-all {% if card.conviction >= 8 %}bg-green-500{% elif card.conviction >= 5 %}bg-blue-500{% else %}bg-gray-400{% endif %}"
+                         style="width: {{ card.conviction * 10 }}%"></div>
+                </div>
+            </div>
+            {% else %}
+            <!-- 분석 대기 -->
+            <div class="mb-3 py-3 text-center">
+                <span class="text-sm text-gray-400 dark:text-gray-500">분석 대기중</span>
+            </div>
+            {% endif %}
+
+            <!-- 보유 정보 -->
+            {% if card.has_holding %}
+            <div class="pt-3 border-t border-gray-100 dark:border-gray-700">
+                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                    보유: {{ card.holding_shares }}주 @ ${{ "%.2f"|format(card.holding_avg_cost) }}
+                </div>
+                {% if card.holding_pnl_pct is not none %}
+                <div class="text-sm font-semibold {% if card.holding_pnl_pct >= 0 %}text-green-600 dark:text-green-400{% else %}text-red-600 dark:text-red-400{% endif %}">
+                    P&L: {{ "%+.1f"|format(card.holding_pnl_pct) }}%
+                    (${{ "%+,.0f"|format(card.holding_pnl_amount) }})
+                </div>
+                {% endif %}
+            </div>
+            {% endif %}
+        </a>
+        {% endfor %}
+    </div>
+
+    {% else %}
+    <!-- 빈 상태 -->
+    <div class="text-center py-16">
+        <div class="text-5xl mb-4">🔬</div>
+        <h2 class="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-2">워치리스트가 비어 있습니다</h2>
+        <p class="text-gray-500 dark:text-gray-400">
+            <code class="bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded text-sm">investmate watchlist add TICKER</code>
+            명령으로 종목을 추가하세요.
+        </p>
+    </div>
+    {% endif %}
+
+    <!-- 면책 -->
+    <p class="text-center text-xs text-gray-400 dark:text-gray-500 mt-8">
+        투자 참고용이며 투자 권유가 아닙니다
+    </p>
+</div>
+{% endblock %}

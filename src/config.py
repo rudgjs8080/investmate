@@ -94,6 +94,9 @@ class Settings(BaseSettings):
     )
     # AI 모드 (debate: 멀티 에이전트 토론 / legacy: 단일 호출)
     ai_mode: str = Field(default="legacy", alias="INVESTMATE_AI_MODE")
+    # Deep Dive 전용
+    ai_model_deepdive: str = Field(default="opus", alias="INVESTMATE_AI_MODEL_DEEPDIVE")
+    deepdive_timeout: int = Field(default=600, alias="INVESTMATE_DEEPDIVE_TIMEOUT")
     # 리스크 제어
     max_sector_pct: float = Field(default=0.4, alias="INVESTMATE_MAX_SECTOR_PCT")
     # 거래 비용 (슬리피지 + 수수료, 왕복 기준 bps)
