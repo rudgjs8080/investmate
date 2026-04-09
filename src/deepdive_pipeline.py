@@ -214,12 +214,18 @@ class DeepDivePipeline:
 
     def _collect_for_ticker(self, entry: WatchlistEntry) -> int:
         """단일 종목 데이터 보강."""
+        from datetime import timedelta
+
         count = 0
         try:
             from src.data.providers.yfinance_provider import YFinancePriceProvider
 
             provider = YFinancePriceProvider()
-            prices = provider.fetch_prices([entry.ticker], period="5d")
+            start = self.target_date - timedelta(days=7)
+            result_tuple = provider.fetch_prices(
+                [entry.ticker], start_date=start, end_date=self.target_date,
+            )
+            prices = result_tuple[0] if isinstance(result_tuple, tuple) else result_tuple
             if prices:
                 with get_session(self.engine) as session:
                     ensure_date_ids(
