@@ -284,12 +284,18 @@ class DeepDivePipeline:
         return count
 
     def step5_ai_analysis(self) -> int:
-        """dd_s5_ai: 종목별 3라운드 CLI 토론."""
-        from src.deepdive.ai_debate_cli import run_deepdive_debate
+        """dd_s5_ai: 종목별 3라운드 CLI 토론.
+
+        Phase 11d: INVESTMATE_DEEPDIVE_PARALLEL=true면 라운드 내 Bull/Bear를
+        asyncio.gather로 병렬 실행(종목 간 순차는 유지).
+        """
+        from src.deepdive.ai_debate_cli import run_debate_smart
 
         settings = get_settings()
         model = settings.ai_model_deepdive
         timeout = settings.deepdive_timeout
+        parallel = bool(getattr(settings, "deepdive_parallel", False))
+        backend = str(getattr(settings, "deepdive_backend", "cli"))
         analyzed = 0
 
         # Phase 10: 포트폴리오 컨텍스트 계산 (step5 내부 1회)
@@ -307,11 +313,13 @@ class DeepDivePipeline:
                 current_price, daily_change = self._get_current_price(entry.stock_id)
                 layers = self._layer_results.get(entry.ticker, {})
 
-                debate_result = run_deepdive_debate(
+                debate_result = run_debate_smart(
                     entry, layers, current_price, daily_change,
                     timeout=timeout, model=model,
                     pair_results=self._pair_results.get(entry.ticker),
                     portfolio_context=portfolio_context,
+                    parallel=parallel,
+                    backend=backend,
                 )
                 if debate_result and debate_result.final_result:
                     self._ai_results[entry.ticker] = debate_result.final_result
@@ -635,8 +643,11 @@ class DeepDivePipeline:
 
         from src.alerts.notifier import send_deepdive_summary
         from src.deepdive.alert_engine import (
+            build_layer_snapshot,
             evaluate_alerts_batch,
+            evaluate_catalyst_alerts,
             format_alerts_summary,
+            format_catalyst_block,
         )
 
         settings = get_settings()
@@ -659,7 +670,7 @@ class DeepDivePipeline:
                 elif c.change_type == "new_risk":
                     new_risks.append(f"{ticker}: {c.description}")
 
-        # Phase 8: 실행 가이드 기반 알림 (buy zone, stop, target)
+        # Phase 8 + Phase 11a: 실행 가이드 + invalidation 자동 감지 알림
         alert_entries = []
         for entry in self._watchlist_entries:
             guide = self._execution_guides.get(entry.ticker)
@@ -667,23 +678,73 @@ class DeepDivePipeline:
                 continue
             ai = self._ai_results.get(entry.ticker)
             invalidations = list(ai.invalidation_conditions) if ai else []
+            next_review = ai.next_review_trigger if ai else None
             current, prev = self._get_current_and_previous_price(entry.stock_id)
+            layers = self._layer_results.get(entry.ticker, {})
+            close_history = self._get_recent_closes(entry.stock_id, limit=220)
+            layer_snapshot = build_layer_snapshot(
+                layers, current_price=current, close_history=close_history,
+            )
             alert_entries.append({
                 "ticker": entry.ticker,
                 "current_price": current,
                 "previous_price": prev,
                 "execution_guide": guide,
                 "invalidation_conditions": invalidations,
+                "next_review_trigger": next_review,
+                "layer_snapshot": layer_snapshot,
             })
 
-        alerts = evaluate_alerts_batch(alert_entries)
+        # Phase 11a: 일일 중복 방지 set (한 run 내에서 공유)
+        dedup_keys: set[str] = set()
+        alerts = evaluate_alerts_batch(alert_entries, dedup_keys=dedup_keys)
+
+        # Phase 11b: 촉매 캘린더 트리거 — Layer 5 구조화 필드 기반
+        catalyst_items: list[tuple[str, tuple]] = []
+        for entry in self._watchlist_entries:
+            layers = self._layer_results.get(entry.ticker, {})
+            layer5 = layers.get("layer5")
+            structured = getattr(layer5, "upcoming_catalysts_structured", ()) if layer5 else ()
+            if not structured:
+                continue
+            current_price, _ = self._get_current_price(entry.stock_id)
+            if current_price <= 0:
+                continue
+            catalyst_items.append((entry.ticker, structured))
+            cat_triggers = evaluate_catalyst_alerts(
+                entry.ticker, current_price, structured,
+            )
+            alerts.extend(cat_triggers)
+
+        catalyst_block = format_catalyst_block(catalyst_items) if catalyst_items else ""
         alert_summary_text = format_alerts_summary(alerts) if alerts else ""
+        if catalyst_block:
+            logger.info("Deep Dive 촉매: %d종목", len(catalyst_items))
         if alert_summary_text:
             logger.info("Deep Dive alerts: %d건", len(alerts))
             # new_risks에 critical/warning 알림을 우선 얹음
             for a in alerts:
                 if a.severity in ("critical", "warning"):
                     new_risks.append(f"{a.ticker}: {a.message}")
+
+        # Phase 12b: 알림 영구 저장 (Telegram 푸시 전) — dedup은 UniqueConstraint로
+        if alerts:
+            try:
+                from src.db.repository import AlertRepository
+
+                stock_id_lookup = {
+                    e.ticker: e.stock_id for e in self._watchlist_entries
+                }
+                with get_session(self.engine) as session:
+                    persisted = AlertRepository.persist_batch(
+                        session,
+                        date_id=self.run_date_id,
+                        stock_id_lookup=stock_id_lookup,
+                        alerts=alerts,
+                    )
+                logger.info("Deep Dive 알림 DB 저장: %d건 신규", persisted)
+            except Exception as exc:  # pragma: no cover - 저장 실패 시에도 Telegram은 계속
+                logger.warning("알림 DB 저장 실패: %s", exc)
 
         sent = send_deepdive_summary(
             run_date=self.target_date,
@@ -712,6 +773,25 @@ class DeepDivePipeline:
         current = float(rows[0].close)
         prev = float(rows[1].close) if len(rows) > 1 else None
         return current, prev
+
+    def _get_recent_closes(self, stock_id: int, limit: int = 220) -> list[float]:
+        """최근 N개 종가 이력(오름차순, 오래된 → 최신). Phase 11a snapshot용."""
+        try:
+            with get_session(self.engine) as session:
+                rows = list(
+                    session.execute(
+                        select(FactDailyPrice)
+                        .where(FactDailyPrice.stock_id == stock_id)
+                        .order_by(FactDailyPrice.date_id.desc())
+                        .limit(limit)
+                    ).scalars().all()
+                )
+        except Exception as e:
+            logger.warning("가격 이력 조회 실패 (stock_id=%d): %s", stock_id, e)
+            return []
+        closes = [float(r.close) for r in rows]
+        closes.reverse()
+        return closes
 
 
 def _layer_summary(layer) -> str | None:

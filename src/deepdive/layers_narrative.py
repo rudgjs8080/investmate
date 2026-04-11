@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from src.db.models import BridgeNewsStock, FactNews
 from src.deepdive.layers_utils import round_or_none, sf
-from src.deepdive.schemas import NarrativeProfile
+from src.deepdive.schemas import NarrativeProfile, UpcomingCatalyst
 
 logger = logging.getLogger(__name__)
 
@@ -66,8 +66,10 @@ def _compute(
     # 추이
     trend = _detect_trend(s30, s60, s90)
 
-    # 촉매
+    # 촉매 (legacy 문자열 리스트)
     catalysts = _detect_catalysts(ticker, reference_date)
+    # Phase 11b: 구조화된 촉매
+    structured_catalysts = _detect_catalysts_structured(ticker, reference_date)
 
     # 리스크 이벤트 (최근 7일 부정 뉴스)
     cutoff_7_dt = dt.combine(reference_date - timedelta(days=7), dt.min.time())
@@ -93,6 +95,7 @@ def _compute(
             "news_count_90d": len(news_rows),
             "negative_7d": len(risk_events),
         },
+        upcoming_catalysts_structured=structured_catalysts,
     )
 
 
@@ -118,31 +121,63 @@ def _detect_trend(s30: float | None, s60: float | None, s90: float | None) -> st
 
 
 def _detect_catalysts(ticker: str, reference_date: date) -> list[str]:
-    catalysts = []
+    """Legacy 문자열 리스트 — 기존 렌더러 호환 유지."""
+    return [c.label for c in _detect_catalysts_structured(ticker, reference_date)]
+
+
+def _detect_catalysts_structured(
+    ticker: str, reference_date: date,
+) -> tuple[UpcomingCatalyst, ...]:
+    """Phase 11b: 구조화된 촉매 수집 — alert 엔진/UI/DTO 공용.
+
+    D+0 ~ D+30의 earnings, D+0 ~ D+14의 FOMC를 수집.
+    """
+    items: list[UpcomingCatalyst] = []
+
     try:
         from src.data.event_collector import collect_earnings_calendar
 
         cal = collect_earnings_calendar([ticker], reference_date)
-        if cal:
-            for item in cal:
-                days = (item.get("date", reference_date) - reference_date).days
-                if 0 < days <= 30:
-                    catalysts.append(f"실적 발표 {days}일 후")
-    except Exception:
-        pass
+        ctx = cal.get(ticker) if isinstance(cal, dict) else None
+        if ctx is not None and ctx.next_earnings is not None:
+            ev = ctx.next_earnings
+            days = ev.days_until
+            if 0 <= days <= 30:
+                label = f"실적 발표 {days}일 후" if days > 0 else "실적 발표 당일"
+                items.append(
+                    UpcomingCatalyst(
+                        kind="earnings",
+                        event_date=ev.earnings_date,
+                        days_until=days,
+                        label=label,
+                    )
+                )
+    except Exception as e:
+        logger.debug("구조화 실적 캘린더 수집 실패 [%s]: %s", ticker, e)
 
     try:
         from src.data.event_collector import get_next_fomc_date
 
         fomc = get_next_fomc_date(reference_date)
-        if fomc:
-            days = (fomc - reference_date).days
-            if 0 < days <= 14:
-                catalysts.append(f"FOMC {days}일 후")
-    except Exception:
-        pass
+        if fomc is not None:
+            if isinstance(fomc, tuple):
+                fomc_date, days = fomc
+            else:
+                fomc_date = fomc
+                days = (fomc_date - reference_date).days
+            if 0 <= days <= 14:
+                items.append(
+                    UpcomingCatalyst(
+                        kind="fomc",
+                        event_date=fomc_date,
+                        days_until=days,
+                        label=f"FOMC {days}일 후" if days > 0 else "FOMC 당일",
+                    )
+                )
+    except Exception as e:
+        logger.debug("FOMC 일정 조회 실패: %s", e)
 
-    return catalysts
+    return tuple(items)
 
 
 def _detect_risks(recent_news: list) -> list[str]:

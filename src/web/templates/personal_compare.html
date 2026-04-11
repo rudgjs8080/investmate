@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+
+{% block title %}종목 비교 — Deep Dive{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto">
+    <!-- 헤더 -->
+    <div class="flex items-center justify-between mb-6 flex-wrap gap-3">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900 dark:text-white">📊 종목 직접 비교</h1>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                워치리스트에서 2~4개 선택 · 6레이어/AI/실행가이드 비교
+            </p>
+        </div>
+        <a href="/personal" class="text-sm text-indigo-500 hover:underline">&larr; 개인 분석</a>
+    </div>
+
+    <!-- 종목 선택 -->
+    <section class="mb-6 bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-5">
+        <h2 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">종목 선택</h2>
+        <form method="get" onsubmit="return dd_submitCompareForm()">
+            <div id="dd_compare_picker" class="flex flex-wrap gap-2 mb-3">
+                {% for ticker in watchlist_tickers %}
+                <label class="inline-flex items-center gap-1 px-2 py-1 rounded border border-gray-200 dark:border-gray-700 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700">
+                    <input type="checkbox" name="picker" value="{{ ticker }}" {% if ticker in selected_tickers %}checked{% endif %} class="accent-indigo-600">
+                    <span class="text-sm text-gray-700 dark:text-gray-200">{{ ticker }}</span>
+                </label>
+                {% endfor %}
+            </div>
+            <input type="hidden" name="tickers" id="dd_compare_hidden">
+            <button type="submit" class="px-4 py-1.5 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">비교</button>
+            <span class="text-xs text-gray-500 dark:text-gray-400 ml-2">최대 4개</span>
+        </form>
+    </section>
+
+    {% if columns %}
+    <!-- 비교 표 -->
+    <section class="mb-6 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-x-auto">
+        <table class="w-full text-sm">
+            <thead class="bg-gray-50 dark:bg-gray-900/50">
+                <tr>
+                    <th class="text-left p-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">지표</th>
+                    {% for col in columns %}
+                    <th class="text-center p-3">
+                        <a href="/personal/{{ col.ticker }}" class="text-sm font-bold text-indigo-600 dark:text-indigo-400 hover:underline">{{ col.ticker }}</a>
+                        <div class="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[120px]">{{ col.name }}</div>
+                        {% if col.current_price and col.current_price > 0 %}
+                        <div class="text-xs text-gray-400 mt-1">${{ "%.2f"|format(col.current_price) }}</div>
+                        {% endif %}
+                    </th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for row_key, row_label, row_type in rows %}
+                <tr class="border-t border-gray-100 dark:border-gray-700">
+                    <td class="p-3 text-xs text-gray-600 dark:text-gray-300 font-medium">{{ row_label }}</td>
+                    {% for col in columns %}
+                    {% set val = col.metrics.get(row_key) %}
+                    {% set bw = best_worst.get(row_key) %}
+                    {% set is_best = bw and loop.index0 == bw.best %}
+                    {% set is_worst = bw and loop.index0 == bw.worst %}
+                    <td class="p-3 text-center text-sm
+                        {% if is_best %}bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 font-semibold{% endif %}
+                        {% if is_worst %}bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400{% endif %}">
+                        {% if col.missing %}
+                        <span class="text-gray-300 dark:text-gray-600">-</span>
+                        {% elif val is none %}
+                        <span class="text-gray-300 dark:text-gray-600">-</span>
+                        {% elif row_type == 'pct' %}
+                        {{ "%+.1f"|format(val) }}%
+                        {% elif row_type == 'ratio' %}
+                        {{ "%.2f"|format(val) }}
+                        {% elif row_type == 'int10' %}
+                        {{ val }}/10
+                        {% else %}
+                        {{ val }}
+                        {% endif %}
+                    </td>
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </section>
+
+    <!-- 레이더 차트 -->
+    <section class="mb-6 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-5">
+        <h2 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">6레이어 레이더 비교</h2>
+        <div id="dd_compare_radar" class="w-full" style="height: 360px;"></div>
+    </section>
+
+    {% else %}
+    <div class="text-center py-16">
+        <div class="text-5xl mb-4">📊</div>
+        <p class="text-gray-500 dark:text-gray-400">비교할 종목을 선택해주세요</p>
+    </div>
+    {% endif %}
+
+    <p class="text-center text-xs text-gray-400 dark:text-gray-500 mt-8">
+        투자 참고용이며 투자 권유가 아닙니다
+    </p>
+</div>
+
+<script>
+function dd_submitCompareForm() {
+    const checked = Array.from(document.querySelectorAll('input[name="picker"]:checked'));
+    if (checked.length === 0) {
+        alert('적어도 1개 종목을 선택하세요');
+        return false;
+    }
+    if (checked.length > 4) {
+        alert('최대 4개까지 선택 가능합니다');
+        return false;
+    }
+    // picker checkboxes → tickers hidden
+    document.getElementById('dd_compare_hidden').value = checked.map(c => c.value).join(',');
+    // picker는 submit되지 않도록 이름 제거
+    checked.forEach(c => c.removeAttribute('name'));
+    return true;
+}
+
+// 레이더 차트 렌더링
+document.addEventListener('DOMContentLoaded', () => {
+    const container = document.getElementById('dd_compare_radar');
+    if (!container) return;
+    const data = {{ radar_data | safe }};
+    const tickers = Object.keys(data);
+    if (tickers.length === 0) return;
+
+    if (typeof echarts === 'undefined') {
+        container.innerHTML = '<p class="text-xs text-gray-400 text-center py-4">차트 라이브러리 로드 실패</p>';
+        return;
+    }
+
+    const indicators = [
+        {name: 'Layer1 펀더', max: 10},
+        {name: 'Layer2 밸류', max: 10},
+        {name: 'Layer3 기술', max: 10},
+        {name: 'Layer4 수급', max: 10},
+        {name: 'Layer5 내러', max: 10},
+        {name: 'Layer6 매크로', max: 10},
+    ];
+    const colors = ['#6366f1', '#10b981', '#f59e0b', '#ec4899'];
+    const series = tickers.map((t, i) => ({
+        name: t,
+        value: [
+            data[t].layer1 || 5,
+            data[t].layer2 || 5,
+            data[t].layer3 || 5,
+            data[t].layer4 || 5,
+            data[t].layer5 || 5,
+            data[t].layer6 || 5,
+        ],
+        itemStyle: {color: colors[i % colors.length]},
+        lineStyle: {color: colors[i % colors.length], width: 2},
+        areaStyle: {color: colors[i % colors.length], opacity: 0.1},
+    }));
+
+    const chart = echarts.init(container);
+    chart.setOption({
+        tooltip: {trigger: 'item'},
+        legend: {data: tickers, bottom: 0},
+        radar: {
+            indicator: indicators,
+            splitNumber: 5,
+            axisName: {color: '#9ca3af', fontSize: 11},
+        },
+        series: [{type: 'radar', data: series}],
+    });
+    window.addEventListener('resize', () => chart.resize());
+});
+</script>
+{% endblock %}

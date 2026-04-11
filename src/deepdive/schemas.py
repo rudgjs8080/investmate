@@ -3,8 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date as _date
 
 from pydantic import BaseModel
+
+
+class UpcomingCatalyst(BaseModel, frozen=True):
+    """Phase 11b: 임박 촉매 (earnings/ex_dividend/fomc) 구조화 표현."""
+
+    kind: str              # earnings | ex_dividend | fomc
+    event_date: _date
+    days_until: int
+    label: str             # "실적 발표 3일 후" 등 표시용 요약
 
 
 class FundamentalHealth(BaseModel, frozen=True):
@@ -79,6 +89,8 @@ class NarrativeProfile(BaseModel, frozen=True):
     risk_events: list[str]
     exec_changes: list[str]
     metrics: dict
+    # Phase 11b: 구조화된 촉매 — UI 표시용 legacy 필드(upcoming_catalysts)는 유지
+    upcoming_catalysts_structured: tuple[UpcomingCatalyst, ...] = ()
 
 
 class MacroSensitivity(BaseModel, frozen=True):

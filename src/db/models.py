@@ -951,3 +951,45 @@ class FactDeepDiveChange(TimestampMixin, Base):
     severity: Mapped[str] = mapped_column(
         String(10), nullable=False, default="info"
     )
+
+
+class FactDeepDiveAlert(TimestampMixin, Base):
+    """Deep Dive 알림 히스토리 (Phase 12b).
+
+    alert_engine이 발화한 각 AlertTrigger를 영구 저장해
+    웹/CLI에서 히스토리 조회·확인(acknowledge)을 지원한다.
+
+    dedup은 (ticker, trigger_type, date_id) UniqueConstraint로 강제.
+    """
+
+    __tablename__ = "fact_deepdive_alerts"
+    __table_args__ = (
+        UniqueConstraint(
+            "ticker", "trigger_type", "date_id",
+            name="uq_dd_alerts_ticker_type_date",
+        ),
+        Index("idx_dd_alerts_date", "date_id"),
+        Index("idx_dd_alerts_ticker_date", "ticker", "date_id"),
+        Index("idx_dd_alerts_severity_ack", "severity", "acknowledged"),
+    )
+
+    alert_id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True
+    )
+    date_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    stock_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    ticker: Mapped[str] = mapped_column(String(20), nullable=False)
+    trigger_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    severity: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="info"
+    )
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    current_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    reference_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    context_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    acknowledged: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    acknowledged_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )

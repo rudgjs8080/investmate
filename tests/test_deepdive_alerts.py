@@ -1,4 +1,4 @@
-"""Phase 8: Alert 엔진 테스트."""
+"""Phase 8 + Phase 11a: Alert 엔진 테스트."""
 
 from __future__ import annotations
 
@@ -6,10 +6,12 @@ import pytest
 
 from src.deepdive.alert_engine import (
     AlertTrigger,
+    build_layer_snapshot,
     evaluate_alerts,
     evaluate_alerts_batch,
     format_alerts_summary,
 )
+from src.deepdive.invalidation_parser import LayerSnapshot
 
 
 _GUIDE = {
@@ -168,6 +170,157 @@ class TestFormatSummary:
         warning_idx = summary.find("C warning")
         info_idx = summary.find("A info")
         assert critical_idx < warning_idx < info_idx
+
+    def test_invalidation_hit_fires_on_rsi(self):
+        snap = LayerSnapshot(
+            rsi=38.0, macd_hist=None, macd_hist_prev=None,
+            sma_20=None, sma_50=None, sma_200=None,
+            high_52w=None, low_52w=None, f_score=None,
+            sector_per_premium_pct=None, close=180.0,
+        )
+        triggers = evaluate_alerts(
+            ticker="AAPL", current_price=180.0, previous_price=179.0,
+            execution_guide=_GUIDE,
+            invalidation_conditions=["RSI 40 하회"],
+            layer_snapshot=snap,
+        )
+        inv = [t for t in triggers if t.trigger_type == "invalidation_hit"]
+        assert len(inv) == 1
+        assert inv[0].severity == "critical"
+        assert "RSI 40 하회" in inv[0].message
+        assert "RSI=38.0" in inv[0].message
+
+    def test_invalidation_hit_no_fire_when_safe(self):
+        snap = LayerSnapshot(
+            rsi=55.0, macd_hist=None, macd_hist_prev=None,
+            sma_20=None, sma_50=None, sma_200=None,
+            high_52w=None, low_52w=None, f_score=None,
+            sector_per_premium_pct=None, close=180.0,
+        )
+        triggers = evaluate_alerts(
+            ticker="AAPL", current_price=180.0, previous_price=179.0,
+            execution_guide=_GUIDE,
+            invalidation_conditions=["RSI 40 하회"],
+            layer_snapshot=snap,
+        )
+        assert not any(t.trigger_type == "invalidation_hit" for t in triggers)
+
+    def test_invalidation_sma_below_close(self):
+        snap = LayerSnapshot(
+            rsi=None, macd_hist=None, macd_hist_prev=None,
+            sma_20=None, sma_50=None, sma_200=155.0,
+            high_52w=None, low_52w=None, f_score=None,
+            sector_per_premium_pct=None, close=150.0,
+        )
+        triggers = evaluate_alerts(
+            ticker="TSLA", current_price=150.0, previous_price=156.0,
+            execution_guide={"buy_zone_low": 140.0, "buy_zone_high": 148.0,
+                             "stop_loss": 135.0},
+            invalidation_conditions=["200일 이평선 이탈"],
+            layer_snapshot=snap,
+        )
+        inv = [t for t in triggers if t.trigger_type == "invalidation_hit"]
+        assert len(inv) == 1
+
+    def test_review_trigger_hit_is_warning(self):
+        snap = LayerSnapshot(
+            rsi=72.0, macd_hist=None, macd_hist_prev=None,
+            sma_20=None, sma_50=None, sma_200=None,
+            high_52w=None, low_52w=None, f_score=None,
+            sector_per_premium_pct=None, close=200.0,
+        )
+        triggers = evaluate_alerts(
+            ticker="NVDA", current_price=200.0, previous_price=199.0,
+            execution_guide=_GUIDE,
+            next_review_trigger="RSI 70 상회",
+            layer_snapshot=snap,
+        )
+        rev = [t for t in triggers if t.trigger_type == "review_trigger_hit"]
+        assert len(rev) == 1
+        assert rev[0].severity == "warning"
+
+    def test_dedup_same_day_single_fire(self):
+        """같은 키는 dedup_keys가 공유될 때 한 번만 발화."""
+        snap = LayerSnapshot(
+            rsi=38.0, macd_hist=None, macd_hist_prev=None,
+            sma_20=None, sma_50=None, sma_200=None,
+            high_52w=None, low_52w=None, f_score=None,
+            sector_per_premium_pct=None, close=180.0,
+        )
+        dedup: set[str] = set()
+        t1 = evaluate_alerts(
+            ticker="AAPL", current_price=180.0, previous_price=179.0,
+            execution_guide=_GUIDE,
+            invalidation_conditions=["RSI 40 하회"],
+            layer_snapshot=snap,
+            dedup_keys=dedup,
+        )
+        t2 = evaluate_alerts(
+            ticker="AAPL", current_price=180.0, previous_price=179.0,
+            execution_guide=_GUIDE,
+            invalidation_conditions=["RSI 40 하회"],
+            layer_snapshot=snap,
+            dedup_keys=dedup,
+        )
+        inv1 = [t for t in t1 if t.trigger_type == "invalidation_hit"]
+        inv2 = [t for t in t2 if t.trigger_type == "invalidation_hit"]
+        assert len(inv1) == 1
+        assert len(inv2) == 0
+
+    def test_invalidation_without_snapshot_is_skipped(self):
+        triggers = evaluate_alerts(
+            ticker="AAPL", current_price=180.0, previous_price=179.0,
+            execution_guide=_GUIDE,
+            invalidation_conditions=["RSI 40 하회"],
+            layer_snapshot=None,
+        )
+        assert not any(t.trigger_type == "invalidation_hit" for t in triggers)
+
+
+class TestBuildLayerSnapshot:
+    def test_builds_from_layer_dto(self):
+        from src.deepdive.schemas import FundamentalHealth, TechnicalProfile
+
+        layer1 = FundamentalHealth(
+            health_grade="A", f_score=8, z_score=None,
+            margin_trend="stable", gross_margin=None, operating_margin=None,
+            net_margin=None, roe=None, debt_ratio=None,
+            earnings_beat_streak=0, metrics={},
+        )
+        layer3 = TechnicalProfile(
+            technical_grade="Bullish", trend_alignment="aligned_up",
+            position_52w_pct=80.0, rsi=65.0, macd_signal="bullish",
+            nearest_support=170.0, nearest_resistance=200.0,
+            relative_strength_pct=None, atr_regime="Normal",
+            metrics={"high_52w": 210.0, "low_52w": 150.0},
+        )
+        snap = build_layer_snapshot(
+            {"layer1": layer1, "layer3": layer3},
+            current_price=180.0,
+        )
+        assert snap.rsi == 65.0
+        assert snap.high_52w == 210.0
+        assert snap.low_52w == 150.0
+        assert snap.f_score == 8
+        assert snap.close == 180.0
+
+    def test_builds_with_close_history_computes_sma(self):
+        closes = [float(100 + i) for i in range(60)]  # 100, 101, ..., 159
+        snap = build_layer_snapshot(
+            {}, current_price=159.0, close_history=closes,
+        )
+        assert snap.sma_20 is not None
+        assert snap.sma_50 is not None
+        assert snap.sma_200 is None  # 60 < 200
+        # SMA20 of last 20 values = mean(140..159) = 149.5
+        assert abs(snap.sma_20 - 149.5) < 0.01
+
+    def test_close_history_none_leaves_sma_none(self):
+        snap = build_layer_snapshot({}, current_price=100.0)
+        assert snap.sma_20 is None
+        assert snap.sma_50 is None
+        assert snap.macd_hist is None
+
 
     def test_truncates_beyond_20(self):
         triggers = [

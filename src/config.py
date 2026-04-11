@@ -97,6 +97,16 @@ class Settings(BaseSettings):
     # Deep Dive 전용
     ai_model_deepdive: str = Field(default="opus", alias="INVESTMATE_AI_MODEL_DEEPDIVE")
     deepdive_timeout: int = Field(default=600, alias="INVESTMATE_DEEPDIVE_TIMEOUT")
+    # Phase 11d: AI 토론 병렬화 / 백엔드
+    deepdive_parallel: bool = Field(
+        default=False, alias="INVESTMATE_DEEPDIVE_PARALLEL",
+    )
+    deepdive_backend: str = Field(
+        default="cli", alias="INVESTMATE_DEEPDIVE_BACKEND",
+    )  # cli | sdk | auto — sdk는 Phase 11d 2단계에서 구현 예정
+    deepdive_parallel_max: int = Field(
+        default=2, alias="INVESTMATE_DEEPDIVE_PARALLEL_MAX",
+    )
     # 리스크 제어
     max_sector_pct: float = Field(default=0.4, alias="INVESTMATE_MAX_SECTOR_PCT")
     # 거래 비용 (슬리피지 + 수수료, 왕복 기준 bps)

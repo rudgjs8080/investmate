@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+
+{% block title %}알림 센터 — Deep Dive{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto">
+    <!-- 헤더 -->
+    <div class="flex items-center justify-between mb-6 flex-wrap gap-3">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900 dark:text-white">🔔 알림 센터</h1>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                최근 {{ filter_days }}일 · 총 {{ total_count }}건
+                {% if unread_count > 0 %}· <span class="text-red-600 dark:text-red-400 font-semibold">미확인 {{ unread_count }}건</span>{% endif %}
+            </p>
+        </div>
+        <div class="flex items-center gap-2">
+            <a href="/personal" class="text-sm text-indigo-500 hover:underline">&larr; 개인 분석</a>
+            {% if unread_count > 0 %}
+            <button type="button" onclick="dd_ackAll()"
+                class="px-3 py-1.5 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">
+                전체 확인
+            </button>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- 필터 바 -->
+    <form method="get" class="flex flex-wrap items-center gap-2 mb-6 p-3 bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700">
+        <label class="text-xs text-gray-500 dark:text-gray-400">기간
+            <select name="days" class="ml-1 text-sm bg-transparent border border-gray-200 dark:border-gray-700 rounded px-2 py-1">
+                {% for d in [1, 7, 30, 60, 90] %}
+                <option value="{{ d }}" {% if filter_days == d %}selected{% endif %}>{{ d }}일</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="text-xs text-gray-500 dark:text-gray-400">심각도
+            <select name="severity" class="ml-1 text-sm bg-transparent border border-gray-200 dark:border-gray-700 rounded px-2 py-1">
+                <option value="" {% if not filter_severity %}selected{% endif %}>전체</option>
+                <option value="critical" {% if filter_severity == 'critical' %}selected{% endif %}>Critical</option>
+                <option value="warning" {% if filter_severity == 'warning' %}selected{% endif %}>Warning+</option>
+                <option value="info" {% if filter_severity == 'info' %}selected{% endif %}>Info+</option>
+            </select>
+        </label>
+        <label class="text-xs text-gray-500 dark:text-gray-400">확인
+            <select name="ack" class="ml-1 text-sm bg-transparent border border-gray-200 dark:border-gray-700 rounded px-2 py-1">
+                <option value="" {% if not filter_ack %}selected{% endif %}>전체</option>
+                <option value="unread" {% if filter_ack == 'unread' %}selected{% endif %}>미확인</option>
+                <option value="read" {% if filter_ack == 'read' %}selected{% endif %}>확인</option>
+            </select>
+        </label>
+        <label class="text-xs text-gray-500 dark:text-gray-400">종목
+            <input name="ticker" value="{{ filter_ticker }}" maxlength="10" placeholder="예: AAPL"
+                class="ml-1 text-sm bg-transparent border border-gray-200 dark:border-gray-700 rounded px-2 py-1 uppercase w-20">
+        </label>
+        <button type="submit" class="text-sm px-3 py-1 bg-gray-100 dark:bg-gray-700 rounded hover:bg-gray-200 dark:hover:bg-gray-600">적용</button>
+    </form>
+
+    <!-- 그룹화된 타임라인 -->
+    {% if total_count == 0 %}
+    <div class="text-center py-16 bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700">
+        <div class="text-5xl mb-4">📭</div>
+        <p class="text-gray-500 dark:text-gray-400">알림이 없습니다</p>
+    </div>
+    {% else %}
+    {% for bucket_name, items in groups.items() %}
+    {% if items %}
+    <section class="mb-6">
+        <h2 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 uppercase tracking-wide">{{ bucket_name }} <span class="text-gray-400">({{ items | length }})</span></h2>
+        <div class="space-y-2">
+            {% for a in items %}
+            <div id="dd_alert_{{ a.alert_id }}" class="flex items-start justify-between gap-3 p-3 rounded-lg border {% if a.severity == 'critical' %}bg-red-50 dark:bg-red-900/10 border-red-200 dark:border-red-800{% elif a.severity == 'warning' %}bg-amber-50 dark:bg-amber-900/10 border-amber-200 dark:border-amber-800{% else %}bg-blue-50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800{% endif %} {% if a.acknowledged %}opacity-60{% endif %}">
+                <div class="flex items-start gap-2 flex-1 min-w-0">
+                    <span class="text-lg shrink-0">{{ a.severity_icon }}</span>
+                    <div class="flex-1 min-w-0">
+                        <a href="/personal/{{ a.ticker }}" class="text-sm font-semibold text-indigo-600 dark:text-indigo-400 hover:underline">{{ a.ticker }}</a>
+                        <span class="ml-2 text-xs text-gray-500 dark:text-gray-400">{{ a.date }} · {{ a.trigger_type }}</span>
+                        <p class="text-sm text-gray-700 dark:text-gray-200 mt-0.5 break-words">{{ a.message }}</p>
+                    </div>
+                </div>
+                {% if not a.acknowledged %}
+                <button type="button" onclick="dd_ackAlert({{ a.alert_id }})"
+                    class="shrink-0 px-2 py-1 text-xs rounded bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">
+                    확인
+                </button>
+                {% else %}
+                <span class="shrink-0 text-xs text-gray-400">확인됨</span>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+    {% endfor %}
+    {% endif %}
+
+    <p class="text-center text-xs text-gray-400 dark:text-gray-500 mt-8">
+        투자 참고용이며 투자 권유가 아닙니다
+    </p>
+</div>
+
+<script>
+async function dd_ackAlert(alertId) {
+    const resp = await fetch(`/personal/alerts/${alertId}/ack`, {method: 'POST'});
+    const data = await resp.json();
+    if (!resp.ok || !data.success) {
+        alert(data.error || '확인 실패');
+        return;
+    }
+    const el = document.getElementById(`dd_alert_${alertId}`);
+    if (el) el.classList.add('opacity-60');
+    location.reload();
+}
+
+async function dd_ackAll() {
+    if (!confirm('모든 미확인 알림을 확인 처리하시겠습니까?')) return;
+    const resp = await fetch('/personal/alerts/ack-all', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: '{}',
+    });
+    const data = await resp.json();
+    if (!resp.ok || !data.success) {
+        alert(data.error || '확인 실패');
+        return;
+    }
+    location.reload();
+}
+</script>
+{% endblock %}

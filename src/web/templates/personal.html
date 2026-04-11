@@ -5,22 +5,144 @@
 {% block content %}
 <div class="max-w-7xl mx-auto">
     <!-- 헤더 -->
-    <div class="flex items-center justify-between mb-6">
+    <div class="flex items-center justify-between mb-6 flex-wrap gap-3">
         <div>
             <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Deep Dive 개인 분석</h1>
             <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">워치리스트 {{ stock_count }}종목</p>
         </div>
-        <a href="/personal/forecasts" class="text-sm text-indigo-500 hover:underline font-medium">예측 정확도 &rarr;</a>
+        <div class="flex items-center gap-2">
+            <a href="/personal/alerts" id="dd_alerts_link"
+                class="relative px-3 py-1.5 text-sm font-medium rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-700 hover:border-indigo-400 transition"
+                title="알림 센터">
+                🔔 알림
+                <span id="dd_unread_badge" class="hidden absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 bg-red-500 text-white text-xs rounded-full flex items-center justify-center font-bold"></span>
+            </a>
+            <button type="button" onclick="dd_openAddTickerModal()"
+                class="px-3 py-1.5 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition">
+                + 종목 추가
+            </button>
+            <button type="button" onclick="dd_openImportModal()"
+                class="px-3 py-1.5 text-sm font-medium rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-700 hover:border-indigo-400 transition">
+                CSV 가져오기
+            </button>
+            <a href="/personal/compare" class="text-sm text-indigo-500 hover:underline font-medium ml-2">종목 비교 &rarr;</a>
+            <a href="/personal/forecasts" class="text-sm text-indigo-500 hover:underline font-medium">예측 정확도 &rarr;</a>
+        </div>
     </div>
+
+    <!-- Phase 12c: What-if 시뮬레이터 -->
+    <section id="dd_whatif_panel" class="mb-6 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
+        <button type="button" onclick="dd_toggleWhatif()" class="w-full flex items-center justify-between px-5 py-3 text-left">
+            <div>
+                <h2 class="text-base font-bold text-gray-900 dark:text-white">🔮 What-if 시뮬레이터</h2>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">보유 변경 후 리밸런싱·섹터 분포 미리보기</p>
+            </div>
+            <svg id="dd_whatif_chevron" class="w-5 h-5 text-gray-400 transition-transform" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.06l3.71-3.83a.75.75 0 111.08 1.04l-4.25 4.39a.75.75 0 01-1.08 0L5.21 8.27a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
+            </svg>
+        </button>
+        <div id="dd_whatif_body" class="hidden px-5 pb-5 border-t border-gray-100 dark:border-gray-700">
+            <div id="dd_whatif_mods" class="space-y-2 mt-4"></div>
+            <div class="flex items-center gap-2 mt-3">
+                <button type="button" onclick="dd_addMod()" class="text-sm px-3 py-1 rounded bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600">+ 변경 추가</button>
+                <button type="button" onclick="dd_runSimulate()" class="text-sm px-4 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700">시뮬레이션 실행</button>
+                <button type="button" onclick="dd_resetSimulate()" class="text-sm px-3 py-1 text-gray-500 hover:text-gray-700 dark:text-gray-400">초기화</button>
+            </div>
+            <div id="dd_whatif_result" class="hidden mt-5"></div>
+        </div>
+    </section>
+
+    {% if rebalance_plan and rebalance_plan.suggestions %}
+    <!-- Phase 11c: 오늘의 리밸런싱 제안 -->
+    <section class="mb-6 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-indigo-200 dark:border-indigo-800 p-5">
+        <div class="flex items-start justify-between mb-4">
+            <div>
+                <h2 class="text-lg font-bold text-gray-900 dark:text-white">📊 오늘의 리밸런싱 제안</h2>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    총 턴오버 {{ rebalance_plan.total_turnover_pct }}%p · 현금 {{ rebalance_plan.cash_weight_pct }}%
+                    {% if rebalance_plan.blocked_sectors %}
+                    · 섹터 상한: {{ rebalance_plan.blocked_sectors | join(", ") }}
+                    {% endif %}
+                </p>
+            </div>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead class="text-xs text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
+                    <tr>
+                        <th class="text-left py-2">티커</th>
+                        <th class="text-right py-2">현재</th>
+                        <th class="text-right py-2">타겟</th>
+                        <th class="text-right py-2">델타</th>
+                        <th class="text-right py-2">주수</th>
+                        <th class="text-right py-2">순 EV (3M)</th>
+                        <th class="text-left py-2 pl-4">근거</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for s in rebalance_plan.suggestions %}
+                    <tr class="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700/30">
+                        <td class="py-2 font-semibold"><a href="/personal/{{ s.ticker }}" class="text-indigo-600 dark:text-indigo-400 hover:underline">{{ s.ticker }}</a></td>
+                        <td class="text-right text-gray-700 dark:text-gray-300">{{ s.current_pct }}%</td>
+                        <td class="text-right text-gray-700 dark:text-gray-300">{{ s.target_pct }}%</td>
+                        <td class="text-right font-semibold {% if s.delta_pct > 0 %}text-green-600 dark:text-green-400{% else %}text-red-600 dark:text-red-400{% endif %}">
+                            {{ "%+.1f"|format(s.delta_pct) }}%p
+                        </td>
+                        <td class="text-right text-gray-600 dark:text-gray-400">{{ "%+d"|format(s.delta_shares) }}</td>
+                        <td class="text-right text-gray-600 dark:text-gray-400">{{ s.net_ev_pct }}%</td>
+                        <td class="py-2 pl-4 text-xs text-gray-500 dark:text-gray-400">{{ s.rationale }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% if rebalance_plan.warnings %}
+        <div class="mt-3 text-xs text-amber-600 dark:text-amber-400">
+            {% for w in rebalance_plan.warnings %}
+            <div>⚠ {{ w }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </section>
+    {% endif %}
 
     {% if cards %}
     <!-- 카드 그리드 -->
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {% for card in cards %}
-        <a href="/personal/{{ card.ticker }}" class="relative block bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 hover:shadow-md transition hover:border-indigo-300 dark:hover:border-indigo-600">
+        <div class="relative bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-4 hover:shadow-md transition hover:border-indigo-300 dark:hover:border-indigo-600">
             {% if card.change_count and card.change_count > 0 %}
-            <span class="absolute top-2 right-2 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center font-bold">{{ card.change_count }}</span>
+            <span class="absolute top-2 right-10 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center font-bold">{{ card.change_count }}</span>
             {% endif %}
+            <!-- 햄버거 메뉴 (카드 우상단) -->
+            <div class="absolute top-2 right-2">
+                <button type="button"
+                    onclick="dd_toggleCardMenu(event, '{{ card.ticker }}')"
+                    class="w-7 h-7 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700"
+                    aria-label="{{ card.ticker }} 메뉴" title="메뉴">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                        <path d="M10 3a1.5 1.5 0 110 3 1.5 1.5 0 010-3zM10 8.5a1.5 1.5 0 110 3 1.5 1.5 0 010-3zM10 14a1.5 1.5 0 110 3 1.5 1.5 0 010-3z" />
+                    </svg>
+                </button>
+                <div id="dd_menu_{{ card.ticker }}" class="hidden absolute right-0 mt-1 w-40 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-10">
+                    <button type="button" onclick="dd_openHoldingModal('{{ card.ticker }}', {{ card.holding_shares or 0 }}, {{ card.holding_avg_cost or 0 }})"
+                        class="w-full text-left px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800">
+                        보유 편집
+                    </button>
+                    {% if card.has_holding %}
+                    <button type="button" onclick="dd_deleteHolding('{{ card.ticker }}')"
+                        class="w-full text-left px-3 py-2 text-sm text-orange-600 dark:text-orange-400 hover:bg-gray-50 dark:hover:bg-gray-800">
+                        보유 삭제
+                    </button>
+                    {% endif %}
+                    <button type="button" onclick="dd_removeWatchlist('{{ card.ticker }}')"
+                        class="w-full text-left px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-gray-50 dark:hover:bg-gray-800 border-t border-gray-100 dark:border-gray-700">
+                        워치리스트 제거
+                    </button>
+                </div>
+            </div>
+            <a href="/personal/{{ card.ticker }}" class="block">
+
             <!-- 티커 + 종목명 -->
             <div class="flex items-start justify-between mb-3">
                 <div>
@@ -122,7 +244,8 @@
                 {% endif %}
             </div>
             {% endif %}
-        </a>
+            </a>
+        </div>
         {% endfor %}
     </div>
 
@@ -131,10 +254,13 @@
     <div class="text-center py-16">
         <div class="text-5xl mb-4">🔬</div>
         <h2 class="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-2">워치리스트가 비어 있습니다</h2>
-        <p class="text-gray-500 dark:text-gray-400">
-            <code class="bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded text-sm">investmate watchlist add TICKER</code>
-            명령으로 종목을 추가하세요.
+        <p class="text-gray-500 dark:text-gray-400 mb-4">
+            상단의 <strong>+ 종목 추가</strong> 버튼 또는 CSV 가져오기로 종목을 등록하세요.
         </p>
+        <button type="button" onclick="dd_openAddTickerModal()"
+            class="px-4 py-2 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition">
+            + 종목 추가
+        </button>
     </div>
     {% endif %}
 
@@ -143,4 +269,419 @@
         투자 참고용이며 투자 권유가 아닙니다
     </p>
 </div>
+
+<!-- ──────────────────────────────────────────────────────────── -->
+<!-- Phase 12a: 워치리스트/보유 CRUD 모달                       -->
+<!-- ──────────────────────────────────────────────────────────── -->
+
+<!-- 종목 추가 모달 -->
+<div id="dd_modal_add_ticker" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+    <div class="bg-white dark:bg-gray-900 rounded-xl shadow-xl w-full max-w-sm p-6 mx-4">
+        <h3 class="text-lg font-bold text-gray-900 dark:text-white mb-4">워치리스트에 종목 추가</h3>
+        <form onsubmit="dd_submitAddTicker(event)">
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">티커</label>
+            <input id="dd_add_ticker" type="text" required maxlength="10"
+                class="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white uppercase"
+                placeholder="예: AAPL">
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-200 mt-3 mb-1">메모 (선택)</label>
+            <input id="dd_add_note" type="text" maxlength="200"
+                class="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white">
+            <div id="dd_add_error" class="hidden mt-2 text-xs text-red-600 dark:text-red-400"></div>
+            <div class="flex items-center justify-end gap-2 mt-5">
+                <button type="button" onclick="dd_closeModal('dd_modal_add_ticker')" class="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-300">취소</button>
+                <button type="submit" class="px-4 py-1.5 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">추가</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 보유 편집 모달 -->
+<div id="dd_modal_holding" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+    <div class="bg-white dark:bg-gray-900 rounded-xl shadow-xl w-full max-w-sm p-6 mx-4">
+        <h3 class="text-lg font-bold text-gray-900 dark:text-white mb-4">보유 정보 <span id="dd_holding_ticker_label"></span></h3>
+        <form onsubmit="dd_submitHolding(event)">
+            <input id="dd_holding_ticker" type="hidden">
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">보유 주수</label>
+            <input id="dd_holding_shares" type="number" required min="1" max="10000000" step="1"
+                class="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white">
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-200 mt-3 mb-1">평단가 ($)</label>
+            <input id="dd_holding_avg_cost" type="number" required min="0.01" step="0.01"
+                class="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white">
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-200 mt-3 mb-1">매수일 (선택)</label>
+            <input id="dd_holding_opened_at" type="date"
+                class="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white">
+            <div id="dd_holding_error" class="hidden mt-2 text-xs text-red-600 dark:text-red-400"></div>
+            <div class="flex items-center justify-end gap-2 mt-5">
+                <button type="button" onclick="dd_closeModal('dd_modal_holding')" class="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-300">취소</button>
+                <button type="submit" class="px-4 py-1.5 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">저장</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- CSV 가져오기 모달 -->
+<div id="dd_modal_import" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+    <div class="bg-white dark:bg-gray-900 rounded-xl shadow-xl w-full max-w-md p-6 mx-4">
+        <h3 class="text-lg font-bold text-gray-900 dark:text-white mb-2">CSV 일괄 가져오기</h3>
+        <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">
+            헤더: <code>ticker,shares,avg_cost,opened_at</code>
+            · <a href="/personal/holdings/csv-template" class="text-indigo-500 hover:underline">템플릿 다운로드</a>
+        </p>
+        <form onsubmit="dd_submitImport(event)">
+            <input id="dd_import_file" type="file" accept=".csv,text/csv" required
+                class="w-full text-sm text-gray-700 dark:text-gray-200">
+            <div id="dd_import_result" class="hidden mt-3 text-xs"></div>
+            <div class="flex items-center justify-end gap-2 mt-5">
+                <button type="button" onclick="dd_closeModal('dd_modal_import')" class="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-300">닫기</button>
+                <button type="submit" class="px-4 py-1.5 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">업로드</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+// ────────────────────────────────────────────────────────────
+// Phase 12c: What-if 시뮬레이터
+// ────────────────────────────────────────────────────────────
+let dd_modRowCount = 0;
+const dd_watchlistTickers = [{% for card in cards %}'{{ card.ticker }}'{% if not loop.last %},{% endif %}{% endfor %}];
+
+function dd_toggleWhatif() {
+    const body = document.getElementById('dd_whatif_body');
+    const chev = document.getElementById('dd_whatif_chevron');
+    const hidden = body.classList.toggle('hidden');
+    chev.style.transform = hidden ? '' : 'rotate(180deg)';
+    if (!hidden && dd_modRowCount === 0) dd_addMod();
+}
+
+function dd_addMod() {
+    dd_modRowCount++;
+    const id = 'dd_mod_row_' + dd_modRowCount;
+    const options = dd_watchlistTickers
+        .map(t => `<option value="${t}">${t}</option>`).join('');
+    const row = document.createElement('div');
+    row.id = id;
+    row.className = 'flex items-center gap-2 flex-wrap';
+    row.innerHTML = `
+        <select data-role="ticker" class="text-sm bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded px-2 py-1 w-24">
+            ${options}
+        </select>
+        <select data-role="mode" class="text-sm bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded px-2 py-1">
+            <option value="delta">증감</option>
+            <option value="absolute">절대</option>
+        </select>
+        <input type="number" data-role="value" step="1" placeholder="예: 50 또는 -30"
+            class="text-sm bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded px-2 py-1 w-28">
+        <span class="text-xs text-gray-500 dark:text-gray-400">주</span>
+        <button type="button" onclick="document.getElementById('${id}').remove()" class="text-red-500 hover:text-red-700 text-sm">✕</button>
+    `;
+    document.getElementById('dd_whatif_mods').appendChild(row);
+}
+
+function dd_resetSimulate() {
+    document.getElementById('dd_whatif_mods').innerHTML = '';
+    document.getElementById('dd_whatif_result').classList.add('hidden');
+    dd_modRowCount = 0;
+    dd_addMod();
+}
+
+async function dd_runSimulate() {
+    const rows = document.querySelectorAll('#dd_whatif_mods > div');
+    const mods = [];
+    for (const row of rows) {
+        const ticker = row.querySelector('[data-role="ticker"]').value;
+        const mode = row.querySelector('[data-role="mode"]').value;
+        const raw = row.querySelector('[data-role="value"]').value;
+        if (!raw) continue;
+        const val = parseInt(raw, 10);
+        if (isNaN(val)) continue;
+        if (mode === 'absolute') {
+            if (val < 0) { alert(`${ticker}: 절대값은 0 이상이어야 합니다`); return; }
+            mods.push({ticker, shares: val});
+        } else {
+            mods.push({ticker, shares_delta: val});
+        }
+    }
+    if (mods.length === 0) { alert('변경사항을 입력하세요'); return; }
+
+    const resultEl = document.getElementById('dd_whatif_result');
+    resultEl.classList.remove('hidden');
+    resultEl.innerHTML = '<div class="text-sm text-gray-500">계산 중...</div>';
+
+    try {
+        const resp = await fetch('/personal/simulate', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({modifications: mods}),
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+            resultEl.innerHTML = `<div class="text-sm text-red-600 dark:text-red-400">${data.error || '시뮬레이션 실패'}</div>`;
+            return;
+        }
+        dd_renderSimulateResult(resultEl, data.data);
+    } catch (e) {
+        resultEl.innerHTML = '<div class="text-sm text-red-600 dark:text-red-400">네트워크 오류</div>';
+    }
+}
+
+function dd_renderSimulateResult(el, d) {
+    const fmtPct = x => (x >= 0 ? '+' : '') + x.toFixed(2) + '%p';
+    const beforeVal = d.before_total_value.toLocaleString();
+    const afterVal = d.after_total_value.toLocaleString();
+    const valueDelta = d.after_total_value - d.before_total_value;
+
+    let html = `
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <!-- Before -->
+            <div class="p-3 bg-gray-50 dark:bg-gray-900/50 rounded-lg border border-gray-200 dark:border-gray-700">
+                <h3 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Before</h3>
+                <p class="text-sm text-gray-700 dark:text-gray-200">총 $${beforeVal}</p>
+                ${dd_renderSectorBars(d.before_sector_weights)}
+            </div>
+            <!-- After -->
+            <div class="p-3 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg border border-indigo-200 dark:border-indigo-800">
+                <h3 class="text-xs font-semibold text-indigo-600 dark:text-indigo-400 uppercase tracking-wide mb-2">After ${valueDelta >= 0 ? '↑' : '↓'}</h3>
+                <p class="text-sm text-gray-700 dark:text-gray-200">총 $${afterVal} (${valueDelta >= 0 ? '+' : ''}$${valueDelta.toLocaleString()})</p>
+                ${dd_renderSectorBars(d.after_sector_weights)}
+            </div>
+        </div>
+    `;
+
+    if (d.violations && d.violations.length > 0) {
+        html += '<div class="mt-3 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">';
+        html += '<p class="text-xs font-semibold text-red-700 dark:text-red-400 mb-1">⚠ 제약 위반</p>';
+        html += '<ul class="text-xs text-red-600 dark:text-red-300 space-y-0.5">';
+        d.violations.forEach(v => html += `<li>• ${v}</li>`);
+        html += '</ul></div>';
+    }
+
+    if (d.warnings && d.warnings.length > 0) {
+        html += '<div class="mt-3 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">';
+        html += '<p class="text-xs font-semibold text-amber-700 dark:text-amber-400 mb-1">경고</p>';
+        html += '<ul class="text-xs text-amber-700 dark:text-amber-300 space-y-0.5">';
+        d.warnings.forEach(w => html += `<li>• ${w}</li>`);
+        html += '</ul></div>';
+    }
+
+    // After 플랜 제안 테이블
+    if (d.after.suggestions && d.after.suggestions.length > 0) {
+        html += '<div class="mt-4"><h3 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">After 리밸런싱 제안</h3>';
+        html += '<div class="overflow-x-auto"><table class="w-full text-xs">';
+        html += '<thead class="text-gray-500 dark:text-gray-400"><tr><th class="text-left py-1">티커</th><th class="text-right py-1">현재%</th><th class="text-right py-1">타겟%</th><th class="text-right py-1">델타</th><th class="text-right py-1">주수</th><th class="text-left py-1 pl-3">근거</th></tr></thead><tbody>';
+        d.after.suggestions.forEach(s => {
+            const deltaColor = s.delta_pct > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400';
+            html += `<tr class="border-t border-gray-100 dark:border-gray-800"><td class="py-1 font-semibold">${s.ticker}</td><td class="text-right">${s.current_pct}%</td><td class="text-right">${s.target_pct}%</td><td class="text-right ${deltaColor}">${fmtPct(s.delta_pct)}</td><td class="text-right">${s.delta_shares > 0 ? '+' : ''}${s.delta_shares}</td><td class="pl-3 text-gray-500 dark:text-gray-400">${s.rationale}</td></tr>`;
+        });
+        html += '</tbody></table></div></div>';
+    }
+
+    el.innerHTML = html;
+}
+
+function dd_renderSectorBars(sectors) {
+    if (!sectors || sectors.length === 0) return '<p class="text-xs text-gray-400 mt-2">보유 없음</p>';
+    let html = '<div class="space-y-1 mt-2">';
+    sectors.forEach(s => {
+        html += `<div class="flex items-center gap-2 text-xs">
+            <span class="w-20 truncate text-gray-600 dark:text-gray-300">${s.sector}</span>
+            <div class="flex-1 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                <div class="bg-indigo-500 h-2 rounded-full" style="width: ${Math.min(s.pct, 100)}%"></div>
+            </div>
+            <span class="w-12 text-right text-gray-500 dark:text-gray-400">${s.pct.toFixed(1)}%</span>
+        </div>`;
+    });
+    html += '</div>';
+    return html;
+}
+
+// ────────────────────────────────────────────────────────────
+// Phase 12b: 알림 센터 뱃지 (페이지 로드 + 60초 폴링)
+// ────────────────────────────────────────────────────────────
+async function dd_refreshUnreadBadge() {
+    try {
+        const resp = await fetch('/personal/alerts/unread-count');
+        const data = await resp.json();
+        if (!data.success) return;
+        const badge = document.getElementById('dd_unread_badge');
+        const count = data.data.count || 0;
+        if (count > 0) {
+            badge.textContent = count > 99 ? '99+' : count;
+            badge.classList.remove('hidden');
+        } else {
+            badge.classList.add('hidden');
+        }
+    } catch (e) { /* 네트워크 실패는 무시 */ }
+}
+document.addEventListener('DOMContentLoaded', () => {
+    dd_refreshUnreadBadge();
+    setInterval(dd_refreshUnreadBadge, 60000);
+});
+
+// ────────────────────────────────────────────────────────────
+// Phase 12a: 보유/워치리스트 CRUD 클라이언트 로직
+// ────────────────────────────────────────────────────────────
+function dd_openModal(id) { document.getElementById(id).classList.remove('hidden'); }
+function dd_closeModal(id) { document.getElementById(id).classList.add('hidden'); }
+
+function dd_openAddTickerModal() {
+    document.getElementById('dd_add_ticker').value = '';
+    document.getElementById('dd_add_note').value = '';
+    document.getElementById('dd_add_error').classList.add('hidden');
+    dd_openModal('dd_modal_add_ticker');
+}
+
+function dd_openImportModal() {
+    document.getElementById('dd_import_file').value = '';
+    document.getElementById('dd_import_result').classList.add('hidden');
+    dd_openModal('dd_modal_import');
+}
+
+function dd_openHoldingModal(ticker, shares, avgCost) {
+    document.getElementById('dd_holding_ticker').value = ticker;
+    document.getElementById('dd_holding_ticker_label').textContent = ticker;
+    document.getElementById('dd_holding_shares').value = shares > 0 ? shares : '';
+    document.getElementById('dd_holding_avg_cost').value = avgCost > 0 ? avgCost : '';
+    document.getElementById('dd_holding_opened_at').value = '';
+    document.getElementById('dd_holding_error').classList.add('hidden');
+    dd_openModal('dd_modal_holding');
+    dd_closeAllCardMenus();
+}
+
+function dd_toggleCardMenu(ev, ticker) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const target = document.getElementById('dd_menu_' + ticker);
+    const isHidden = target.classList.contains('hidden');
+    dd_closeAllCardMenus();
+    if (isHidden) target.classList.remove('hidden');
+}
+
+function dd_closeAllCardMenus() {
+    document.querySelectorAll('[id^="dd_menu_"]').forEach(el => el.classList.add('hidden'));
+}
+
+document.addEventListener('click', ev => {
+    if (!ev.target.closest('[id^="dd_menu_"]') && !ev.target.closest('button[onclick^="dd_toggleCardMenu"]')) {
+        dd_closeAllCardMenus();
+    }
+});
+
+async function dd_submitAddTicker(ev) {
+    ev.preventDefault();
+    const ticker = document.getElementById('dd_add_ticker').value.trim().toUpperCase();
+    const note = document.getElementById('dd_add_note').value.trim();
+    const errEl = document.getElementById('dd_add_error');
+    errEl.classList.add('hidden');
+    try {
+        const resp = await fetch('/personal/watchlist', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ticker, note: note || undefined}),
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+            errEl.textContent = data.error || '추가 실패';
+            errEl.classList.remove('hidden');
+            return;
+        }
+        location.reload();
+    } catch (e) {
+        errEl.textContent = '네트워크 오류';
+        errEl.classList.remove('hidden');
+    }
+}
+
+async function dd_submitHolding(ev) {
+    ev.preventDefault();
+    const ticker = document.getElementById('dd_holding_ticker').value;
+    const shares = parseInt(document.getElementById('dd_holding_shares').value, 10);
+    const avg_cost = parseFloat(document.getElementById('dd_holding_avg_cost').value);
+    const opened_at = document.getElementById('dd_holding_opened_at').value || undefined;
+    const errEl = document.getElementById('dd_holding_error');
+    errEl.classList.add('hidden');
+    try {
+        const resp = await fetch('/personal/holdings', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ticker, shares, avg_cost, opened_at}),
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+            errEl.textContent = data.error || '저장 실패';
+            errEl.classList.remove('hidden');
+            return;
+        }
+        location.reload();
+    } catch (e) {
+        errEl.textContent = '네트워크 오류';
+        errEl.classList.remove('hidden');
+    }
+}
+
+async function dd_deleteHolding(ticker) {
+    if (!confirm(`${ticker}의 보유정보를 삭제하시겠습니까?`)) return;
+    const resp = await fetch(`/personal/holdings/${encodeURIComponent(ticker)}`, {method: 'DELETE'});
+    const data = await resp.json();
+    if (!resp.ok || !data.success) {
+        alert(data.error || '삭제 실패');
+        return;
+    }
+    location.reload();
+}
+
+async function dd_removeWatchlist(ticker) {
+    if (!confirm(`${ticker}을(를) 워치리스트에서 제거하시겠습니까?\n보유 정보도 함께 삭제됩니다.`)) return;
+    const resp = await fetch(`/personal/watchlist/${encodeURIComponent(ticker)}`, {method: 'DELETE'});
+    const data = await resp.json();
+    if (!resp.ok || !data.success) {
+        alert(data.error || '제거 실패');
+        return;
+    }
+    location.reload();
+}
+
+async function dd_submitImport(ev) {
+    ev.preventDefault();
+    const fileInput = document.getElementById('dd_import_file');
+    const resultEl = document.getElementById('dd_import_result');
+    resultEl.classList.add('hidden');
+    if (!fileInput.files.length) return;
+
+    const formData = new FormData();
+    formData.append('file', fileInput.files[0]);
+
+    try {
+        const resp = await fetch('/personal/holdings/import', {method: 'POST', body: formData});
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+            resultEl.className = 'mt-3 text-xs text-red-600 dark:text-red-400';
+            resultEl.textContent = data.error || '업로드 실패';
+            resultEl.classList.remove('hidden');
+            return;
+        }
+        const {imported_count, error_count, errors} = data.data;
+        resultEl.className = 'mt-3 text-xs';
+        let html = `<div class="text-green-600 dark:text-green-400">✓ ${imported_count}건 가져옴</div>`;
+        if (error_count > 0) {
+            html += `<div class="text-amber-600 dark:text-amber-400 mt-1">⚠ ${error_count}건 실패:</div>`;
+            html += '<ul class="mt-1 pl-4 list-disc text-gray-600 dark:text-gray-300">';
+            errors.slice(0, 5).forEach(e => {
+                html += `<li>line ${e.line}${e.ticker ? ' ('+e.ticker+')' : ''}: ${e.error}</li>`;
+            });
+            if (errors.length > 5) html += `<li>...외 ${errors.length - 5}건</li>`;
+            html += '</ul>';
+        }
+        resultEl.innerHTML = html;
+        resultEl.classList.remove('hidden');
+        if (imported_count > 0) {
+            setTimeout(() => location.reload(), 1500);
+        }
+    } catch (e) {
+        resultEl.className = 'mt-3 text-xs text-red-600 dark:text-red-400';
+        resultEl.textContent = '네트워크 오류';
+        resultEl.classList.remove('hidden');
+    }
+}
+</script>
 {% endblock %}

@@ -1,7 +1,12 @@
-"""Deep Dive CLI 기반 3라운드 토론 오케스트레이터."""
+"""Deep Dive CLI 기반 3라운드 토론 오케스트레이터.
+
+Phase 11d: asyncio 병렬화 옵션(run_debate_async / run_debate_smart).
+SDK 백엔드는 NotImplementedError로 예약 — Phase 11d 2단계에서 구현 예정.
+"""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from src.deepdive.ai_prompts import (
@@ -181,6 +186,180 @@ def run_deepdive_debate(
         bull_summary=bull_r2_text[:2000] if bull_r2_text else None,
         bear_summary=bear_r2_text[:2000] if bear_r2_text else None,
     )
+
+
+# ──────────────────────────────────────────
+# Phase 11d: asyncio 병렬 경로 + 디스패처
+# ──────────────────────────────────────────
+
+
+async def run_deepdive_debate_async(
+    entry, layers: dict, current_price: float, daily_change: float,
+    timeout: int = 600, model: str = "opus",
+    pair_results: list | None = None,
+    portfolio_context: dict | None = None,
+) -> CLIDebateResult | None:
+    """3라운드 CLI 토론의 asyncio 병렬 버전.
+
+    R1 Bull/Bear 병렬 → R2 Bull/Bear 병렬 → R3 단독.
+    CLI subprocess는 asyncio.to_thread로 래핑해 블록 해제.
+    """
+    context = build_stock_context(
+        entry, layers, current_price, daily_change,
+        pair_results=pair_results,
+        portfolio_context=portfolio_context,
+    )
+    r1_prompt = _build_r1_prompt(context)
+
+    logger.info("[%s] R1 Bull/Bear 병렬 시작", entry.ticker)
+    bull_r1_coro = asyncio.to_thread(
+        run_deepdive_cli, r1_prompt, BULL_SYSTEM_PROMPT, timeout, model,
+    )
+    bear_r1_coro = asyncio.to_thread(
+        run_deepdive_cli, r1_prompt, BEAR_SYSTEM_PROMPT, timeout, model,
+    )
+    bull_r1_raw, bear_r1_raw = await asyncio.gather(
+        bull_r1_coro, bear_r1_coro, return_exceptions=True,
+    )
+    bull_r1_raw = _coerce_raw_or_none(bull_r1_raw, "[%s] R1 Bull 실패", entry.ticker)
+    bear_r1_raw = _coerce_raw_or_none(bear_r1_raw, "[%s] R1 Bear 실패", entry.ticker)
+
+    rounds: list[DebateRound] = []
+    rounds.append(
+        DebateRound(
+            1, "bull", bull_r1_raw or "",
+            _parse_round(bull_r1_raw) if bull_r1_raw else None,
+        )
+    )
+    rounds.append(
+        DebateRound(
+            1, "bear", bear_r1_raw or "",
+            _parse_round(bear_r1_raw) if bear_r1_raw else None,
+        )
+    )
+
+    # R2 Bull/Bear 병렬 — 상대 R1 필요
+    async def _bull_r2() -> str | None:
+        if not (bull_r1_raw and bear_r1_raw):
+            return None
+        prompt = _build_r2_bull_prompt(context, bear_r1_raw)
+        return await asyncio.to_thread(
+            run_deepdive_cli, prompt, BULL_SYSTEM_PROMPT, timeout, model,
+        )
+
+    async def _bear_r2() -> str | None:
+        if not (bull_r1_raw and bear_r1_raw):
+            return None
+        prompt = _build_r2_bear_prompt(context, bull_r1_raw)
+        return await asyncio.to_thread(
+            run_deepdive_cli, prompt, BEAR_SYSTEM_PROMPT, timeout, model,
+        )
+
+    logger.info("[%s] R2 Bull/Bear 병렬 시작", entry.ticker)
+    bull_r2_raw, bear_r2_raw = await asyncio.gather(
+        _bull_r2(), _bear_r2(), return_exceptions=True,
+    )
+    bull_r2_raw = _coerce_raw_or_none(bull_r2_raw, "[%s] R2 Bull 실패", entry.ticker)
+    bear_r2_raw = _coerce_raw_or_none(bear_r2_raw, "[%s] R2 Bear 실패", entry.ticker)
+
+    bull_r2_text = bull_r2_raw or bull_r1_raw or ""
+    bear_r2_text = bear_r2_raw or bear_r1_raw or ""
+    rounds.append(
+        DebateRound(
+            2, "bull", bull_r2_text,
+            _parse_round(bull_r2_raw) if bull_r2_raw else None,
+        )
+    )
+    rounds.append(
+        DebateRound(
+            2, "bear", bear_r2_text,
+            _parse_round(bear_r2_raw) if bear_r2_raw else None,
+        )
+    )
+
+    # R3 Synthesizer
+    logger.info("[%s] R3 Synthesizer 시작", entry.ticker)
+    r3_prompt = _build_r3_prompt(context, bull_r2_text, bear_r2_text)
+    synth_raw = await asyncio.to_thread(
+        run_deepdive_cli, r3_prompt, SYNTH_SYSTEM_PROMPT, timeout, model,
+    )
+    synth_parsed = _parse_round(synth_raw) if synth_raw else None
+    rounds.append(DebateRound(3, "synthesizer", synth_raw or "", synth_parsed))
+
+    if synth_parsed and "action_grade" in synth_parsed:
+        final = _parse_ai_response(synth_raw)
+        consensus = synth_parsed.get("consensus_strength", "medium")
+        scenarios = synth_parsed.get("scenarios")
+        return CLIDebateResult(
+            rounds=tuple(rounds),
+            final_result=final,
+            scenarios=scenarios,
+            consensus_strength=consensus if consensus in ("high", "medium", "low") else "medium",
+            bull_summary=bull_r2_text[:2000] if bull_r2_text else None,
+            bear_summary=bear_r2_text[:2000] if bear_r2_text else None,
+        )
+
+    logger.warning("[%s] R3 실패 (async), simple 폴백", entry.ticker)
+    fallback = run_deepdive_simple(
+        entry, layers, current_price, daily_change, timeout, model,
+    )
+    return CLIDebateResult(
+        rounds=tuple(rounds),
+        final_result=fallback,
+        scenarios=None,
+        consensus_strength="low",
+        bull_summary=bull_r2_text[:2000] if bull_r2_text else None,
+        bear_summary=bear_r2_text[:2000] if bear_r2_text else None,
+    )
+
+
+def run_debate_smart(
+    entry, layers: dict, current_price: float, daily_change: float,
+    *,
+    timeout: int = 600,
+    model: str = "opus",
+    pair_results: list | None = None,
+    portfolio_context: dict | None = None,
+    parallel: bool = False,
+    backend: str = "cli",
+) -> CLIDebateResult | None:
+    """Phase 11d: 병렬/백엔드 디스패처.
+
+    backend="sdk"는 Phase 11d 2단계에서 구현 예정 — 현재는 NotImplementedError.
+    backend="cli" + parallel=True → asyncio.run(run_deepdive_debate_async(...))
+    backend="cli" + parallel=False → 기존 sync 경로(회귀 안전)
+    """
+    if backend == "sdk":
+        raise NotImplementedError(
+            "deepdive backend='sdk'는 Phase 11d 2단계에서 구현 예정입니다. "
+            "현재는 'cli'만 지원합니다."
+        )
+    if backend not in ("cli", "auto"):
+        raise ValueError(f"알 수 없는 deepdive_backend: {backend!r}")
+
+    if parallel:
+        return asyncio.run(
+            run_deepdive_debate_async(
+                entry, layers, current_price, daily_change,
+                timeout=timeout, model=model,
+                pair_results=pair_results,
+                portfolio_context=portfolio_context,
+            )
+        )
+    return run_deepdive_debate(
+        entry, layers, current_price, daily_change,
+        timeout=timeout, model=model,
+        pair_results=pair_results,
+        portfolio_context=portfolio_context,
+    )
+
+
+def _coerce_raw_or_none(result, log_fmt: str, *args) -> str | None:
+    """asyncio.gather(..., return_exceptions=True) 결과 정규화."""
+    if isinstance(result, BaseException):
+        logger.warning(log_fmt + ": %s", *args, result)
+        return None
+    return result  # str | None
 
 
 # ──────────────────────────────────────────

@@ -24,6 +24,7 @@ from src.db.models import (
     FactDailyPrice,
     FactDailyRecommendation,
     FactDeepDiveAction,
+    FactDeepDiveAlert,
     FactDeepDiveChange,
     FactDeepDiveForecast,
     FactDeepDiveReport,
@@ -880,6 +881,20 @@ class WatchlistRepository:
         return session.execute(stmt).scalar_one_or_none()
 
     @staticmethod
+    def delete_holding(session: Session, ticker: str) -> bool:
+        """보유정보 삭제. 존재하지 않으면 False."""
+        from sqlalchemy import delete
+
+        ticker = ticker.upper()
+        result = session.execute(
+            delete(DimWatchlistHolding).where(
+                DimWatchlistHolding.ticker == ticker
+            )
+        )
+        session.flush()
+        return (result.rowcount or 0) > 0
+
+    @staticmethod
     def get_all_holdings(session: Session) -> dict[str, DimWatchlistHolding]:
         """{ticker: holding} 매핑."""
         stmt = select(DimWatchlistHolding)
@@ -1208,3 +1223,154 @@ class DeepDiveRepository:
             .limit(limit)
         )
         return list(session.execute(stmt).scalars().all())
+
+
+# ────────────────────────────────────────────────────────────────────────
+# Phase 12b: 알림 히스토리 Repository
+# ────────────────────────────────────────────────────────────────────────
+
+
+_SEVERITY_RANK = {"critical": 3, "warning": 2, "info": 1}
+
+
+class AlertRepository:
+    """Deep Dive 알림 영구 저장 + 조회/확인."""
+
+    @staticmethod
+    def persist_batch(
+        session: Session,
+        date_id: int,
+        stock_id_lookup: dict[str, int],
+        alerts,
+    ) -> int:
+        """알림 리스트 영구 저장 (INSERT OR IGNORE로 일일 dedup).
+
+        Args:
+            date_id: 알림 발화 날짜 ID
+            stock_id_lookup: {ticker: stock_id} 매핑. 없는 ticker는 스킵.
+            alerts: AlertTrigger 리스트
+
+        Returns:
+            실제 INSERT된 건수 (중복 제외).
+        """
+        if not alerts:
+            return 0
+
+        rows: list[dict] = []
+        for a in alerts:
+            stock_id = stock_id_lookup.get(a.ticker)
+            if stock_id is None:
+                continue
+            rows.append({
+                "date_id": date_id,
+                "stock_id": stock_id,
+                "ticker": a.ticker,
+                "trigger_type": a.trigger_type,
+                "severity": a.severity,
+                "message": a.message,
+                "current_price": float(a.current_price) if a.current_price else None,
+                "reference_price": (
+                    float(a.reference_price)
+                    if getattr(a, "reference_price", None) is not None
+                    else None
+                ),
+                "context_json": None,
+                "acknowledged": False,
+            })
+
+        if not rows:
+            return 0
+
+        # UniqueConstraint 기반 일일 dedup — INSERT OR IGNORE
+        stmt = sqlite_insert(FactDeepDiveAlert).values(rows)
+        stmt = stmt.on_conflict_do_nothing(
+            index_elements=["ticker", "trigger_type", "date_id"],
+        )
+        result = session.execute(stmt)
+        session.flush()
+        return result.rowcount or 0
+
+    @staticmethod
+    def get_recent(
+        session: Session,
+        days: int = 30,
+        severity_min: str | None = None,
+        ack_filter: str | None = None,  # 'unread' | 'read' | None
+        ticker: str | None = None,
+        limit: int = 200,
+    ) -> list[FactDeepDiveAlert]:
+        """최근 N일 알림 조회 (필터 지원)."""
+        from datetime import date as date_type, timedelta
+
+        cutoff_date_id = date_to_id(date_type.today() - timedelta(days=days))
+
+        stmt = (
+            select(FactDeepDiveAlert)
+            .where(FactDeepDiveAlert.date_id >= cutoff_date_id)
+            .order_by(
+                FactDeepDiveAlert.date_id.desc(),
+                FactDeepDiveAlert.alert_id.desc(),
+            )
+            .limit(limit)
+        )
+
+        if severity_min:
+            rank = _SEVERITY_RANK.get(severity_min, 0)
+            keep = [s for s, r in _SEVERITY_RANK.items() if r >= rank]
+            if keep:
+                stmt = stmt.where(FactDeepDiveAlert.severity.in_(keep))
+
+        if ack_filter == "unread":
+            stmt = stmt.where(FactDeepDiveAlert.acknowledged.is_(False))
+        elif ack_filter == "read":
+            stmt = stmt.where(FactDeepDiveAlert.acknowledged.is_(True))
+
+        if ticker:
+            stmt = stmt.where(FactDeepDiveAlert.ticker == ticker.upper())
+
+        return list(session.execute(stmt).scalars().all())
+
+    @staticmethod
+    def acknowledge(session: Session, alert_id: int) -> bool:
+        """단일 알림 확인 처리. 존재하지 않으면 False."""
+        alert = session.get(FactDeepDiveAlert, alert_id)
+        if alert is None:
+            return False
+        if not alert.acknowledged:
+            alert.acknowledged = True
+            alert.acknowledged_at = datetime.now()
+            session.flush()
+        return True
+
+    @staticmethod
+    def acknowledge_all(session: Session, date_id: int | None = None) -> int:
+        """모든 미확인 알림을 확인 처리. date_id가 주어지면 해당 날짜만."""
+        from sqlalchemy import update
+
+        stmt = (
+            update(FactDeepDiveAlert)
+            .where(FactDeepDiveAlert.acknowledged.is_(False))
+            .values(acknowledged=True, acknowledged_at=datetime.now())
+        )
+        if date_id is not None:
+            stmt = stmt.where(FactDeepDiveAlert.date_id == date_id)
+        result = session.execute(stmt)
+        session.flush()
+        return result.rowcount or 0
+
+    @staticmethod
+    def count_unread(session: Session, days: int = 30) -> int:
+        """미확인 알림 건수 (최근 N일)."""
+        from datetime import date as date_type, timedelta
+        from sqlalchemy import func as sa_func
+
+        cutoff_date_id = date_to_id(date_type.today() - timedelta(days=days))
+        stmt = (
+            select(sa_func.count())
+            .select_from(FactDeepDiveAlert)
+            .where(
+                FactDeepDiveAlert.acknowledged.is_(False),
+                FactDeepDiveAlert.date_id >= cutoff_date_id,
+            )
+        )
+        return int(session.execute(stmt).scalar() or 0)
