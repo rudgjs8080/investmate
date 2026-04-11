@@ -41,9 +41,19 @@ DEEPDIVE_SYSTEM_PROMPT = """\
 - HOLD = 관망
 - ADD = 신규 매수 고려
 
+근거 추적 의무:
+- reasoning 300~600자, 구체 수치 인용
+- evidence_refs 3~6개 ("layer{N}.field=value" 형태)
+- invalidation_conditions 2~3개
+- key_levels(support/resistance/stop_loss) 제공
+
 반드시 아래 JSON 형식만 출력하라. 다른 텍스트 없이 JSON만:
-{"action_grade":"HOLD", "conviction":7, "uncertainty":"medium", \
-"reasoning":"200자 이내 종합 판단", "what_missing":"반대 의견 강조"}
+{"action_grade":"HOLD","conviction":7,"uncertainty":"medium",\
+"reasoning":"구체 수치 인용 종합 판단","what_missing":"반대 의견 강조",\
+"key_levels":{"support":가격,"resistance":가격,"stop_loss":가격},\
+"next_review_trigger":"재검토 조건",\
+"evidence_refs":["layer3.rsi=72","layer1.f_score=8"],\
+"invalidation_conditions":["RSI 40 하회"]}
 """
 
 
@@ -55,14 +65,47 @@ DEEPDIVE_SYSTEM_PROMPT = """\
 def build_stock_context(
     entry, layers: dict, current_price: float, daily_change: float,
     pair_results: list | None = None,
+    portfolio_context: dict | None = None,
 ) -> str:
-    """<stock_context> XML 블록 빌드. 보유정보 있으면 <holding_context> 삽입."""
+    """<stock_context> XML 블록 빌드. 보유정보 있으면 <holding_context> 삽입.
+
+    portfolio_context: {"sector_weights": {s: pct}, "ticker_weights": {t: pct},
+        "max_stock_pct": float, "max_sector_pct": float, "total_names": int}
+    """
     parts = [
         "<stock_context>",
         f"종목: {entry.ticker} ({entry.name})",
         f"섹터: {entry.sector or 'Unknown'} | S&P500: {'Yes' if entry.is_sp500 else 'No'}",
         f"현재가: ${current_price:.2f} | 일간: {daily_change:+.2f}%",
     ]
+
+    if portfolio_context:
+        parts.append("")
+        parts.append("<portfolio_context>")
+        total_names = portfolio_context.get("total_names", 0)
+        parts.append(f"보유 종목 수: {total_names}")
+        sw = portfolio_context.get("sector_weights") or {}
+        if sw:
+            top_sectors = sorted(sw.items(), key=lambda x: x[1], reverse=True)[:5]
+            parts.append(
+                "섹터 분포: "
+                + ", ".join(f"{s}={v*100:.0f}%" for s, v in top_sectors if s)
+            )
+        cur_sector = entry.sector or ""
+        cur_sector_pct = sw.get(cur_sector, 0.0)
+        max_sec = portfolio_context.get("max_sector_pct", 0.30)
+        parts.append(
+            f"이 종목 섹터({cur_sector}) 기존 비중: {cur_sector_pct*100:.1f}% "
+            f"(상한 {max_sec*100:.0f}%, 여유 {(max_sec - cur_sector_pct)*100:+.1f}%p)"
+        )
+        tw = portfolio_context.get("ticker_weights") or {}
+        cur_ticker_pct = tw.get(entry.ticker, 0.0)
+        max_stock = portfolio_context.get("max_stock_pct", 0.10)
+        parts.append(
+            f"이 종목 기존 비중: {cur_ticker_pct*100:.1f}% "
+            f"(상한 {max_stock*100:.0f}%, 여유 {(max_stock - cur_ticker_pct)*100:+.1f}%p)"
+        )
+        parts.append("</portfolio_context>")
 
     # 보유정보 주입
     if entry.holding is not None:
@@ -191,9 +234,13 @@ def build_deepdive_prompt(stock_context: str) -> str:
 def run_deepdive_simple(
     entry, layers: dict, current_price: float, daily_change: float,
     timeout: int = 600, model: str = "opus",
+    portfolio_context: dict | None = None,
 ) -> AIResult | None:
     """Phase 1 단일 CLI 호출. debate 없음."""
-    context = build_stock_context(entry, layers, current_price, daily_change)
+    context = build_stock_context(
+        entry, layers, current_price, daily_change,
+        portfolio_context=portfolio_context,
+    )
     prompt = build_deepdive_prompt(context)
     raw = run_deepdive_cli(prompt, DEEPDIVE_SYSTEM_PROMPT, timeout, model)
     if raw is None:
@@ -206,8 +253,13 @@ def run_deepdive_cli(
     system_prompt: str | None = None,
     timeout: int = 600,
     model: str = "opus",
+    max_attempts: int = 2,
 ) -> str | None:
-    """Claude CLI 호출. --model opus --system-prompt."""
+    """Claude CLI 호출 + 파싱 가능 여부 기반 1회 재시도.
+
+    첫 호출 응답이 비어 있거나 JSON으로 파싱 불가하면 한 번 더 호출.
+    max_attempts=1로 내리면 재시도 비활성.
+    """
     claude_path = shutil.which("claude")
     if not claude_path:
         logger.warning("Claude Code CLI를 찾을 수 없습니다")
@@ -222,26 +274,62 @@ def run_deepdive_cli(
     if node_path:
         env["PATH"] = str(Path(node_path).parent) + os.pathsep + env.get("PATH", "")
 
-    try:
-        result = subprocess.run(
-            cmd, input=prompt,
-            capture_output=True, text=True, timeout=timeout,
-            env=env, encoding="utf-8", errors="replace",
+    last_output: str | None = None
+    for attempt in range(1, max(1, max_attempts) + 1):
+        try:
+            result = subprocess.run(
+                cmd, input=prompt,
+                capture_output=True, text=True, timeout=timeout,
+                env=env, encoding="utf-8", errors="replace",
+            )
+        except subprocess.TimeoutExpired:
+            logger.warning("Deep Dive CLI 타임아웃 (시도 %d/%d, %d초)", attempt, max_attempts, timeout)
+            continue
+        except FileNotFoundError:
+            logger.warning("Claude Code CLI를 찾을 수 없습니다")
+            return None
+        except Exception as e:
+            logger.error("Deep Dive CLI 오류 (시도 %d/%d): %s", attempt, max_attempts, e)
+            continue
+
+        if result.returncode != 0 or not result.stdout.strip():
+            logger.warning(
+                "Deep Dive CLI 실패 (시도 %d/%d, 코드 %d): %s",
+                attempt, max_attempts, result.returncode, (result.stderr or "")[:200],
+            )
+            continue
+
+        last_output = result.stdout.strip()
+        # JSON 파싱 가능하면 즉시 반환. 불가하면 재시도.
+        if _has_parseable_json(last_output):
+            logger.info(
+                "Deep Dive CLI 분석 완료 (시도 %d/%d, %d자)",
+                attempt, max_attempts, len(last_output),
+            )
+            return last_output
+        logger.warning(
+            "Deep Dive CLI 응답이 JSON 파싱 불가 (시도 %d/%d), 재시도",
+            attempt, max_attempts,
         )
-        if result.returncode == 0 and result.stdout.strip():
-            logger.info("Deep Dive CLI 분석 완료 (%d자)", len(result.stdout))
-            return result.stdout.strip()
-        logger.warning("Deep Dive CLI 실패 (코드 %d): %s", result.returncode, result.stderr[:200])
-        return None
-    except subprocess.TimeoutExpired:
-        logger.warning("Deep Dive CLI 타임아웃 (%d초)", timeout)
-        return None
-    except FileNotFoundError:
-        logger.warning("Claude Code CLI를 찾을 수 없습니다")
-        return None
-    except Exception as e:
-        logger.error("Deep Dive CLI 오류: %s", e)
-        return None
+
+    # 재시도 실패 — 마지막 raw output이라도 반환 (regex fallback 기회).
+    return last_output
+
+
+def _has_parseable_json(raw: str) -> bool:
+    """응답에 최소 1개 action_grade 포함 JSON 객체가 있는지."""
+    if "{" not in raw:
+        return False
+    decoder = json.JSONDecoder()
+    for i, ch in enumerate(raw):
+        if ch == "{":
+            try:
+                obj, _ = decoder.raw_decode(raw, i)
+                if isinstance(obj, dict) and ("action_grade" in obj or "action" in obj):
+                    return True
+            except (json.JSONDecodeError, ValueError):
+                continue
+    return False
 
 
 # ──────────────────────────────────────────
@@ -288,13 +376,46 @@ def _dict_to_result(data: dict) -> AIResult | None:
     uncertainty = data.get("uncertainty", "medium").lower()
     if uncertainty not in ("low", "medium", "high"):
         uncertainty = "medium"
+
+    # Phase 4: key_levels 구조화 복구 — Synthesizer가 이미 내놓는 데이터를 버리지 않음.
+    key_levels = data.get("key_levels") or {}
+    support = _safe_float(key_levels.get("support"))
+    resistance = _safe_float(key_levels.get("resistance"))
+    stop_loss = _safe_float(key_levels.get("stop_loss"))
+
+    evidence = data.get("evidence_refs") or []
+    if not isinstance(evidence, (list, tuple)):
+        evidence = []
+    invalidation = data.get("invalidation_conditions") or []
+    if not isinstance(invalidation, (list, tuple)):
+        invalidation = []
+
     return AIResult(
         action_grade=action,
         conviction=conviction,
         uncertainty=uncertainty,
-        reasoning=str(data.get("reasoning", ""))[:500],
+        reasoning=str(data.get("reasoning", ""))[:2000],
         what_missing=data.get("what_missing"),
+        support_price=support,
+        resistance_price=resistance,
+        stop_loss=stop_loss,
+        next_review_trigger=data.get("next_review_trigger"),
+        evidence_refs=tuple(str(e)[:200] for e in evidence if e),
+        invalidation_conditions=tuple(str(c)[:200] for c in invalidation if c),
     )
+
+
+def _safe_float(value) -> float | None:
+    """숫자/문자열 → float. 실패 시 None."""
+    if value is None:
+        return None
+    try:
+        f = float(value)
+        if f <= 0 or f != f:  # NaN or non-positive
+            return None
+        return f
+    except (TypeError, ValueError):
+        return None
 
 
 def _regex_fallback(raw: str) -> AIResult | None:
@@ -303,10 +424,16 @@ def _regex_fallback(raw: str) -> AIResult | None:
     conv_m = re.search(r'"conviction"\s*:\s*(\d+)', raw)
     if not action_m:
         return None
+    support_m = re.search(r'"support"\s*:\s*([\d.]+)', raw)
+    resist_m = re.search(r'"resistance"\s*:\s*([\d.]+)', raw)
+    stop_m = re.search(r'"stop_loss"\s*:\s*([\d.]+)', raw)
     return AIResult(
         action_grade=action_m.group(1).upper(),
         conviction=max(1, min(10, int(conv_m.group(1)))) if conv_m else 5,
         uncertainty="medium",
-        reasoning="AI 응답 파싱 불완전",
+        reasoning="AI 응답 파싱 불완전 (regex fallback)",
         what_missing=None,
+        support_price=_safe_float(support_m.group(1)) if support_m else None,
+        resistance_price=_safe_float(resist_m.group(1)) if resist_m else None,
+        stop_loss=_safe_float(stop_m.group(1)) if stop_m else None,
     )

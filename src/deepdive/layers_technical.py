@@ -78,6 +78,7 @@ def _compute(session: Session, stock_id: int, date_id: int) -> TechnicalProfile 
     nearest_resistance = sr.resistances[0].price if sr.resistances else None
 
     atr_regime = _detect_atr_regime(df)
+    atr_14_value = _compute_atr_14(df)
 
     bullish_count = 0
     bearish_count = 0
@@ -116,6 +117,8 @@ def _compute(session: Session, stock_id: int, date_id: int) -> TechnicalProfile 
             "sma20": round(sma20, 2) if sma20 else None,
             "sma50": round(sma50, 2) if sma50 else None,
             "price_count": len(prices),
+            "atr_14": round(atr_14_value, 4) if atr_14_value is not None else None,
+            "current_close": round(float(close), 2),
         },
     )
 
@@ -152,3 +155,18 @@ def _detect_atr_regime(df: pd.DataFrame) -> str:
     if atr_pct < 1.0:
         return "Low"
     return "Normal"
+
+
+def _compute_atr_14(df: pd.DataFrame) -> float | None:
+    """ATR(14) 원시값 — execution guide가 손절 계산에 사용."""
+    if len(df) < 15:
+        return None
+    high = df["high"].tail(14)
+    low = df["low"].tail(14)
+    close_prev = df["close"].shift(1).tail(14)
+    tr = pd.concat(
+        [high - low, (high - close_prev).abs(), (low - close_prev).abs()],
+        axis=1,
+    ).max(axis=1)
+    atr = tr.mean()
+    return float(atr) if pd.notna(atr) else None

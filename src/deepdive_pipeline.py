@@ -59,6 +59,7 @@ class DeepDivePipeline:
         self._debate_results: dict = {}  # ticker → CLIDebateResult
         self._pair_results: dict[str, list] = {}       # ticker → list[PeerComparison]
         self._change_results: dict[str, list] = {}     # ticker → list[ChangeRecord]
+        self._execution_guides: dict = {}              # ticker → ExecutionGuide
 
         # 그레이스풀 셧다운
         try:
@@ -116,6 +117,7 @@ class DeepDivePipeline:
             ("dd_s3_compute", self.step3_compute_layers),
             ("dd_s4_pairs", self.step4_pairs),
             ("dd_s5_ai", self.step5_ai_analysis),
+            ("dd_s5_5_guide", self.step5_5_execution_guide),
             ("dd_s6_diff", self.step6_diff_detection),
             ("dd_s7_persist", self.step7_persist),
             ("dd_s8_notify", self.step8_notify),
@@ -290,6 +292,16 @@ class DeepDivePipeline:
         timeout = settings.deepdive_timeout
         analyzed = 0
 
+        # Phase 10: 포트폴리오 컨텍스트 계산 (step5 내부 1회)
+        sector_weights, ticker_weights = self._compute_existing_weights()
+        portfolio_context = {
+            "sector_weights": sector_weights,
+            "ticker_weights": ticker_weights,
+            "max_stock_pct": float(getattr(settings, "max_single_stock_pct", 0.10)),
+            "max_sector_pct": float(getattr(settings, "max_sector_weight_pct", 0.30)),
+            "total_names": len(ticker_weights),
+        } if sector_weights or ticker_weights else None
+
         for entry in self._watchlist_entries:
             try:
                 current_price, daily_change = self._get_current_price(entry.stock_id)
@@ -299,6 +311,7 @@ class DeepDivePipeline:
                     entry, layers, current_price, daily_change,
                     timeout=timeout, model=model,
                     pair_results=self._pair_results.get(entry.ticker),
+                    portfolio_context=portfolio_context,
                 )
                 if debate_result and debate_result.final_result:
                     self._ai_results[entry.ticker] = debate_result.final_result
@@ -335,6 +348,121 @@ class DeepDivePipeline:
         else:
             change = 0.0
         return current, round(change, 2)
+
+    def step5_5_execution_guide(self) -> int:
+        """dd_s5_5_guide: AI 결과 + 레이어 + 시나리오 → 정량 매매 가이드.
+
+        Phase 9: 과거 horizon별 hit_rate로 EV 디스카운트 적용.
+        실패는 격리 (한 종목 실패가 전체 파이프라인 중단시키지 않음).
+        """
+        from src.deepdive.execution_guide import compute_execution_guide
+        from src.deepdive.forecast_evaluator import (
+            apply_hit_rate_discount,
+            get_historical_hit_rates,
+        )
+
+        settings = get_settings()
+        built = 0
+
+        # 포트폴리오 컨텍스트: 기존 holding 기반 섹터/종목 비중 (근사 — 수량*현재가 합)
+        sector_weights, ticker_weights = self._compute_existing_weights()
+
+        for entry in self._watchlist_entries:
+            ai_result = self._ai_results.get(entry.ticker)
+            if ai_result is None:
+                continue
+            layers = self._layer_results.get(entry.ticker, {})
+            debate = self._debate_results.get(entry.ticker)
+            scenarios = debate.scenarios if debate else None
+            current_price, _ = self._get_current_price(entry.stock_id)
+
+            try:
+                guide = compute_execution_guide(
+                    current_price=current_price,
+                    ai_result=ai_result,
+                    layers=layers,
+                    scenarios=scenarios,
+                    sector=entry.sector,
+                    settings=settings,
+                    existing_sector_weight=sector_weights.get(entry.sector or "", 0.0),
+                    existing_ticker_weight=ticker_weights.get(entry.ticker, 0.0),
+                )
+                if guide is not None:
+                    # Phase 9: hit_rate 디스카운트
+                    try:
+                        with get_session(self.engine) as session:
+                            hit_rates = get_historical_hit_rates(session, entry.ticker)
+                        if hit_rates:
+                            discounted = apply_hit_rate_discount(
+                                guide.expected_value_pct, hit_rates,
+                            )
+                            # frozen dataclass이므로 dataclasses.replace로 치환
+                            import dataclasses as _dc
+
+                            guide = _dc.replace(guide, expected_value_pct=discounted)
+                    except Exception as e:
+                        logger.warning("hit_rate 디스카운트 실패 (%s): %s", entry.ticker, e)
+
+                    self._execution_guides[entry.ticker] = guide
+                    built += 1
+            except Exception as e:
+                logger.warning("execution guide 실패 (%s): %s", entry.ticker, e)
+        return built
+
+    def _compute_existing_weights(self) -> tuple[dict, dict]:
+        """기존 holding의 섹터/종목 비중(0~1) 계산. 포트폴리오 총가치 기반.
+
+        holding이 없으면 빈 dict 반환.
+        """
+        try:
+            with get_session(self.engine) as session:
+                holdings = WatchlistRepository.get_all_holdings(session)
+
+                if not holdings:
+                    return {}, {}
+
+                # 종목별 현재 시장가치
+                position_values: dict[str, float] = {}
+                sector_values: dict[str, float] = {}
+                total_value = 0.0
+
+                for ticker, h in holdings.items():
+                    stock = StockRepository.get_by_ticker(session, ticker)
+                    if not stock:
+                        continue
+                    prices = list(
+                        session.execute(
+                            select(FactDailyPrice)
+                            .where(FactDailyPrice.stock_id == stock.stock_id)
+                            .order_by(FactDailyPrice.date_id.desc())
+                            .limit(1)
+                        ).scalars().all()
+                    )
+                    if not prices:
+                        continue
+                    price = float(prices[0].close)
+                    value = price * float(h.shares)
+                    position_values[ticker] = value
+                    total_value += value
+
+                    # 섹터
+                    from src.db.models import DimSector
+
+                    sector_name = ""
+                    if stock.sector_id:
+                        sector = session.get(DimSector, stock.sector_id)
+                        sector_name = sector.name if sector else ""
+                    sector_values[sector_name] = sector_values.get(sector_name, 0.0) + value
+
+            if total_value <= 0:
+                return {}, {}
+
+            sector_weights = {s: v / total_value for s, v in sector_values.items() if s}
+            ticker_weights = {t: v / total_value for t, v in position_values.items()}
+            return sector_weights, ticker_weights
+        except Exception as e:
+            logger.warning("포지션 비중 계산 실패: %s", e)
+            return {}, {}
 
     def step6_diff_detection(self) -> int:
         """dd_s6_diff: 전일 대비 변경점 추출."""
@@ -409,6 +537,7 @@ class DeepDivePipeline:
                 prev_conv = prev_report.conviction if prev_report else None
 
                 # report_json 구성
+                guide = self._execution_guides.get(entry.ticker)
                 report_data = {
                     "layers": {
                         k: v.model_dump() if v else None
@@ -416,6 +545,26 @@ class DeepDivePipeline:
                     },
                     "ai_result": ai_result.model_dump(),
                 }
+                if guide is not None:
+                    from src.deepdive.execution_guide import guide_to_dict
+
+                    report_data["execution_guide"] = guide_to_dict(guide)
+                # 페어 비교를 UI 표시용으로 보존
+                pairs = self._pair_results.get(entry.ticker) or []
+                if pairs:
+                    report_data["pair_comparisons"] = [
+                        {
+                            "peer_ticker": p.peer_ticker,
+                            "peer_name": p.peer_name,
+                            "similarity_score": p.similarity_score,
+                            "market_cap_ratio": p.market_cap_ratio,
+                            "return_60d_peer": p.return_60d_peer,
+                            "return_60d_target": p.return_60d_target,
+                            "per_peer": p.per_peer,
+                            "per_target": p.per_target,
+                        }
+                        for p in pairs
+                    ]
 
                 debate = self._debate_results.get(entry.ticker)
 
@@ -480,11 +629,15 @@ class DeepDivePipeline:
         return inserted
 
     def step8_notify(self) -> int:
-        """dd_s8_notify: 텔레그램 1줄 요약."""
+        """dd_s8_notify: 텔레그램 1줄 요약 + 실행 가이드 알림."""
         if self.skip_notify:
             return 0
 
         from src.alerts.notifier import send_deepdive_summary
+        from src.deepdive.alert_engine import (
+            evaluate_alerts_batch,
+            format_alerts_summary,
+        )
 
         settings = get_settings()
         channels = (settings.notify_channels or "").split(",")
@@ -506,6 +659,32 @@ class DeepDivePipeline:
                 elif c.change_type == "new_risk":
                     new_risks.append(f"{ticker}: {c.description}")
 
+        # Phase 8: 실행 가이드 기반 알림 (buy zone, stop, target)
+        alert_entries = []
+        for entry in self._watchlist_entries:
+            guide = self._execution_guides.get(entry.ticker)
+            if guide is None:
+                continue
+            ai = self._ai_results.get(entry.ticker)
+            invalidations = list(ai.invalidation_conditions) if ai else []
+            current, prev = self._get_current_and_previous_price(entry.stock_id)
+            alert_entries.append({
+                "ticker": entry.ticker,
+                "current_price": current,
+                "previous_price": prev,
+                "execution_guide": guide,
+                "invalidation_conditions": invalidations,
+            })
+
+        alerts = evaluate_alerts_batch(alert_entries)
+        alert_summary_text = format_alerts_summary(alerts) if alerts else ""
+        if alert_summary_text:
+            logger.info("Deep Dive alerts: %d건", len(alerts))
+            # new_risks에 critical/warning 알림을 우선 얹음
+            for a in alerts:
+                if a.severity in ("critical", "warning"):
+                    new_risks.append(f"{a.ticker}: {a.message}")
+
         sent = send_deepdive_summary(
             run_date=self.target_date,
             stock_count=len(self._watchlist_entries),
@@ -516,6 +695,23 @@ class DeepDivePipeline:
             new_risks=new_risks,
         )
         return 1 if sent else 0
+
+    def _get_current_and_previous_price(self, stock_id: int) -> tuple[float, float | None]:
+        """최신/직전 종가 튜플."""
+        with get_session(self.engine) as session:
+            rows = list(
+                session.execute(
+                    select(FactDailyPrice)
+                    .where(FactDailyPrice.stock_id == stock_id)
+                    .order_by(FactDailyPrice.date_id.desc())
+                    .limit(2)
+                ).scalars().all()
+            )
+        if not rows:
+            return 0.0, None
+        current = float(rows[0].close)
+        prev = float(rows[1].close) if len(rows) > 1 else None
+        return current, prev
 
 
 def _layer_summary(layer) -> str | None:

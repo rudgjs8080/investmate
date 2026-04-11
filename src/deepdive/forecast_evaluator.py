@@ -177,3 +177,73 @@ def _group_by_key(
             "count": count,
         }
     return result
+
+
+# ──────────────────────────────────────────
+# Phase 9: 과거 정확도 기반 EV 디스카운트
+# ──────────────────────────────────────────
+
+
+def get_historical_hit_rates(
+    session: Session,
+    ticker: str,
+    min_samples: int = 10,
+) -> dict[str, float]:
+    """종목의 horizon별 과거 hit_rate 조회.
+
+    min_samples 미만이면 해당 horizon 생략.
+
+    Returns:
+        {"1M": 0.62, "3M": 0.45, ...} — 샘플 충분한 것만.
+    """
+    forecasts = DeepDiveRepository.get_evaluated_forecasts_by_ticker(session, ticker)
+    if not forecasts:
+        return {}
+
+    by_horizon: dict[str, list] = defaultdict(list)
+    for f in forecasts:
+        if f.hit_range is not None:  # 평가된 것만
+            by_horizon[f.horizon].append(f)
+
+    result: dict[str, float] = {}
+    for horizon, items in by_horizon.items():
+        if len(items) < min_samples:
+            continue
+        hits = sum(1 for f in items if f.hit_range is True)
+        result[horizon] = hits / len(items)
+    return result
+
+
+def apply_hit_rate_discount(
+    ev_pct: dict,
+    hit_rates: dict[str, float],
+    floor: float = 0.30,
+) -> dict:
+    """EV에 과거 hit_rate를 가중 (미래 예측 캘리브레이션).
+
+    hit_rates가 없거나 해당 horizon 데이터 없으면 원본 유지.
+    hit_rate 낮아도 floor(0.30) 이상으로 바닥 설정 — 과도한 디스카운트 방지.
+
+    Args:
+        ev_pct: {"1M": 3.2, ...}
+        hit_rates: {"1M": 0.55, ...}
+        floor: 최소 적용 가중치
+
+    Returns:
+        디스카운트 적용된 ev dict
+    """
+    if not hit_rates:
+        return dict(ev_pct)
+
+    result: dict = {}
+    for horizon, ev in ev_pct.items():
+        if ev is None:
+            result[horizon] = None
+            continue
+        rate = hit_rates.get(horizon)
+        if rate is None:
+            result[horizon] = ev
+        else:
+            weight = max(rate, floor)
+            result[horizon] = round(ev * weight, 2)
+    return result

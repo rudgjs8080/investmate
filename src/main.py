@@ -1254,6 +1254,103 @@ def deepdive_run(
     pipeline.run()
 
 
+@deepdive.command("latest", help="최신 Deep Dive 리포트 조회")
+@click.option("--ticker", default=None, help="특정 종목만 표시")
+def deepdive_latest(ticker: str | None) -> None:
+    """가장 최근 Deep Dive 리포트(들)을 콘솔에 출력한다."""
+    import json as _json
+
+    from src.db.repository import DeepDiveRepository, StockRepository
+
+    settings = get_settings()
+    engine = create_db_engine(settings.db_path)
+    with get_session(engine) as session:
+        if ticker:
+            stock = StockRepository.get_by_ticker(session, ticker.upper())
+            if not stock:
+                console.print(f"[red]종목을 찾을 수 없음: {ticker}[/red]")
+                return
+            report = DeepDiveRepository.get_latest_report(session, stock.stock_id)
+            reports = [report] if report else []
+        else:
+            reports = DeepDiveRepository.get_latest_reports_all(session)
+
+        if not reports:
+            console.print("[yellow]Deep Dive 리포트 없음[/yellow]")
+            return
+
+        for r in reports:
+            console.print(
+                f"\n[bold cyan]{r.ticker}[/bold cyan] — "
+                f"{r.action_grade} (conviction {r.conviction}/10, "
+                f"consensus {r.consensus_strength or 'N/A'})"
+            )
+            if r.ai_synthesis:
+                console.print(f"  [dim]{r.ai_synthesis[:300]}[/dim]")
+            # execution_guide 출력
+            try:
+                rd = _json.loads(r.report_json or "{}")
+                guide = rd.get("execution_guide")
+                if guide:
+                    console.print(
+                        f"  [green]Buy Zone[/green]: "
+                        f"${guide.get('buy_zone_low'):.2f}~${guide.get('buy_zone_high'):.2f}  "
+                        f"[red]Stop[/red]: ${guide.get('stop_loss'):.2f}  "
+                        f"Target 3M: ${guide.get('target_3m') or 0:.2f}  "
+                        f"EV 3M: {guide.get('expected_value_pct', {}).get('3M', 0):+.1f}%  "
+                        f"R/R: {guide.get('risk_reward_ratio') or 0:.1f}  "
+                        f"Size: {guide.get('suggested_position_pct', 0):.1f}%"
+                    )
+                    warns = guide.get("portfolio_fit_warnings") or []
+                    for w in warns:
+                        console.print(f"  [red]⚠ {w}[/red]")
+            except (ValueError, TypeError, AttributeError):
+                pass
+
+
+@deepdive.command("status", help="Deep Dive 파이프라인 실행 상태")
+def deepdive_status() -> None:
+    """최근 Deep Dive 파이프라인 실행 요약을 출력한다."""
+    from sqlalchemy import select
+
+    from src.db.models import FactCollectionLog
+
+    settings = get_settings()
+    engine = create_db_engine(settings.db_path)
+    with get_session(engine) as session:
+        logs = list(
+            session.execute(
+                select(FactCollectionLog)
+                .where(FactCollectionLog.step.like("dd_%"))
+                .order_by(FactCollectionLog.run_date_id.desc(), FactCollectionLog.step)
+                .limit(50)
+            ).scalars().all()
+        )
+
+    if not logs:
+        console.print("[yellow]Deep Dive 실행 기록 없음[/yellow]")
+        return
+
+    from collections import defaultdict
+
+    by_date = defaultdict(list)
+    for log in logs:
+        by_date[log.run_date_id].append(log)
+
+    for date_id in sorted(by_date.keys(), reverse=True)[:5]:
+        console.print(f"\n[bold]Run {date_id}[/bold]")
+        for log in by_date[date_id]:
+            status_color = {
+                "success": "green",
+                "failed": "red",
+                "interrupted": "yellow",
+            }.get(log.status, "white")
+            console.print(
+                f"  [{status_color}]{log.step}[/{status_color}]: "
+                f"{log.status} ({log.records_count} records)"
+            )
+
+
 # ──────────────────────────────────────────
 # db backfill — 데이터 백필
 # ──────────────────────────────────────────

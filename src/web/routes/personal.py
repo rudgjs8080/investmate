@@ -88,6 +88,38 @@ def personal_dashboard(request: Request, db: Session = Depends(get_db)):
         holding = holdings.get(w.ticker)
         price_info = prices.get(w.ticker, {"current": 0, "change": 0})
 
+        # Phase 5: report_json에서 execution_guide 추출
+        guide = None
+        if report:
+            try:
+                rd = json.loads(report.report_json)
+                guide = rd.get("execution_guide")
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        ev_3m = None
+        rr = None
+        rr_label = None
+        entry_distance_pct = None
+        action_hint = None
+        if guide:
+            ev_values = guide.get("expected_value_pct") or {}
+            ev_3m = ev_values.get("3M")
+            rr = guide.get("risk_reward_ratio")
+            rr_label = guide.get("risk_reward_label")
+            action_hint = guide.get("action_hint")
+            # 진입 존 대비 현재가 거리
+            bz_low = guide.get("buy_zone_low")
+            bz_high = guide.get("buy_zone_high")
+            cur = price_info["current"]
+            if cur and bz_low and bz_high:
+                if bz_low <= cur <= bz_high:
+                    entry_distance_pct = 0.0
+                elif cur < bz_low:
+                    entry_distance_pct = round((cur - bz_low) / bz_low * 100, 1)
+                else:
+                    entry_distance_pct = round((cur - bz_high) / bz_high * 100, 1)
+
         card = {
             "ticker": w.ticker,
             "name": stock.name if stock else w.ticker,
@@ -103,6 +135,11 @@ def personal_dashboard(request: Request, db: Session = Depends(get_db)):
             "holding_pnl_pct": None,
             "holding_pnl_amount": None,
             "change_count": change_counts.get(w.ticker, 0),
+            "ev_3m": ev_3m,
+            "rr": rr,
+            "rr_label": rr_label,
+            "entry_distance_pct": entry_distance_pct,
+            "action_hint": action_hint,
         }
 
         # P&L 계산
@@ -176,7 +213,7 @@ def personal_forecasts(request: Request, db: Session = Depends(get_db)):
 
 @router.get("/personal/{ticker}")
 def personal_detail(ticker: str, request: Request, db: Session = Depends(get_db)):
-    """종목 상세 분석 페이지 — 6레이어 + 토론 + 시나리오."""
+    """종목 상세 분석 페이지 — 실행 가이드 + 6레이어 + 토론 + 시나리오."""
     templates = request.app.state.templates
     ticker = ticker.upper()
 
@@ -185,12 +222,15 @@ def personal_detail(ticker: str, request: Request, db: Session = Depends(get_db)
     ).scalar_one_or_none()
 
     report = None
-    layers_data = {}
-    forecasts = []
+    layers_data: dict = {}
+    forecasts: list = []
     scenario_chart = "{}"
     radar_data = "{}"
     current_price = 0.0
     daily_change = 0.0
+    ai_result_data: dict = {}
+    execution_guide: dict | None = None
+    pair_comparisons: list = []
 
     if stock:
         report = DeepDiveRepository.get_latest_report(db, stock.stock_id)
@@ -198,7 +238,10 @@ def personal_detail(ticker: str, request: Request, db: Session = Depends(get_db)
         if report:
             try:
                 rd = json.loads(report.report_json)
-                layers_data = rd.get("layers", {})
+                layers_data = rd.get("layers", {}) or {}
+                ai_result_data = rd.get("ai_result", {}) or {}
+                execution_guide = rd.get("execution_guide")
+                pair_comparisons = rd.get("pair_comparisons", []) or []
             except (json.JSONDecodeError, TypeError):
                 pass
 
@@ -219,7 +262,10 @@ def personal_detail(ticker: str, request: Request, db: Session = Depends(get_db)
                 prev = float(price_rows[1].close)
                 daily_change = round(((current_price - prev) / prev * 100) if prev > 0 else 0.0, 2)
 
-        scenario_chart = json.dumps(_build_scenario_chart(forecasts, current_price), ensure_ascii=False)
+        scenario_chart = json.dumps(
+            _build_scenario_chart(forecasts, current_price, execution_guide),
+            ensure_ascii=False,
+        )
         radar_data = json.dumps(_build_radar(layers_data), ensure_ascii=False)
 
     holding = WatchlistRepository.get_holding(db, ticker)
@@ -247,6 +293,12 @@ def personal_detail(ticker: str, request: Request, db: Session = Depends(get_db)
             "current_price": current_price,
             "daily_change": daily_change,
             "changes": changes,
+            "ai_result": ai_result_data,
+            "execution_guide": execution_guide,
+            "pair_comparisons": pair_comparisons,
+            "evidence_refs": ai_result_data.get("evidence_refs") or [],
+            "invalidation_conditions": ai_result_data.get("invalidation_conditions") or [],
+            "next_review_trigger": ai_result_data.get("next_review_trigger"),
         },
     )
 
@@ -291,7 +343,9 @@ def personal_history(ticker: str, request: Request, db: Session = Depends(get_db
     )
 
 
-def _build_scenario_chart(forecasts, current_price: float) -> dict:
+def _build_scenario_chart(
+    forecasts, current_price: float, execution_guide: dict | None = None,
+) -> dict:
     if not forecasts:
         return {}
     horizons = []
@@ -304,7 +358,18 @@ def _build_scenario_chart(forecasts, current_price: float) -> dict:
             key = f.scenario.lower()
             entry[key] = {"low": float(f.price_low), "high": float(f.price_high), "prob": float(f.probability)}
         horizons.append(entry)
-    return {"currentPrice": current_price, "horizons": horizons}
+
+    overlays: dict = {}
+    if execution_guide:
+        overlays = {
+            "buy_zone_low": execution_guide.get("buy_zone_low"),
+            "buy_zone_high": execution_guide.get("buy_zone_high"),
+            "stop_loss": execution_guide.get("stop_loss"),
+            "target_1m": execution_guide.get("target_1m"),
+            "target_3m": execution_guide.get("target_3m"),
+            "target_6m": execution_guide.get("target_6m"),
+        }
+    return {"currentPrice": current_price, "horizons": horizons, "overlays": overlays}
 
 
 def _build_radar(layers: dict) -> dict:

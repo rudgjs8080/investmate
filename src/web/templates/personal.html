@@ -65,6 +65,42 @@
                          style="width: {{ card.conviction * 10 }}%"></div>
                 </div>
             </div>
+            <!-- 실행 가이드 배지 -->
+            {% if card.ev_3m is not none or card.rr is not none or card.entry_distance_pct is not none %}
+            <div class="flex flex-wrap gap-1.5 mb-2">
+                {% if card.ev_3m is not none %}
+                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium
+                    {% if card.ev_3m >= 5 %}bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400
+                    {% elif card.ev_3m >= 0 %}bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300
+                    {% else %}bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400{% endif %}"
+                    title="Expected Value 3M">
+                    EV {{ "%+.1f"|format(card.ev_3m) }}%
+                </span>
+                {% endif %}
+                {% if card.rr is not none %}
+                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium
+                    {% if card.rr_label == 'favorable' %}bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400
+                    {% elif card.rr_label == 'unfavorable' %}bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400
+                    {% else %}bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300{% endif %}"
+                    title="Risk/Reward ratio">
+                    R/R {{ "%.1f"|format(card.rr) }}
+                </span>
+                {% endif %}
+                {% if card.entry_distance_pct is not none %}
+                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium
+                    {% if card.entry_distance_pct == 0 %}bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400
+                    {% else %}bg-yellow-50 text-yellow-700 dark:bg-yellow-900/20 dark:text-yellow-400{% endif %}"
+                    title="Buy zone까지 거리">
+                    {% if card.entry_distance_pct == 0 %}Zone 내{% else %}{{ "%+.1f"|format(card.entry_distance_pct) }}%{% endif %}
+                </span>
+                {% endif %}
+                {% if card.action_hint == 'now' %}
+                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-bold bg-green-600 text-white">NOW</span>
+                {% elif card.action_hint == 'avoid' %}
+                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-bold bg-red-600 text-white">AVOID</span>
+                {% endif %}
+            </div>
+            {% endif %}
             {% else %}
             <!-- 분석 대기 -->
             <div class="mb-3 py-3 text-center">

@@ -66,23 +66,32 @@ SYNTH_SYSTEM_PROMPT = """\
 2. 논리적 일관성
 3. 현재 시장 환경(레짐) 정합성
 4. 리스크/보상 비대칭성
+5. 포트폴리오 적합도 — <portfolio_context>가 있으면 섹터/종목 여유를 고려하여 conviction 하향 조정
 
 보유자 관점 (보유 종목만):
 - HOLD = 현 포지션 유지  - ADD = 추가 매수 (확신 높을 때)
 - TRIM = 일부 매도       - EXIT = 전량 매도 (확신 높을 때)
 - +30% 이상 수익 → 이익실현 검토  - -15% 이상 손실 → 손절 검토
 
+근거 추적 의무:
+- reasoning은 300~600자, 구체 수치 인용 (예: "RSI 72, F-Score 8/9, 섹터 PER 프리미엄 +15%")
+- evidence_refs 배열에 사용한 데이터 포인트를 "layer{N}.field=value" 형태로 3~8개 기록
+  (예: "layer3.rsi=72", "layer1.f_score=8", "layer2.per_5y_percentile=85")
+- invalidation_conditions 배열에 이 판단이 깨지는 구체 조건 2~4개 (예: "RSI 40 하회", "다음 분기 EPS 미스")
+
 반드시 아래 JSON 형식만 출력하라. 다른 텍스트 없이 JSON만:
 {"action_grade":"HOLD"|"ADD"|"TRIM"|"EXIT",\
  "conviction":1-10, "uncertainty":"low"|"medium"|"high",\
- "reasoning":"200자 이내 종합 판단",\
+ "reasoning":"300~600자 구체 수치 인용 종합 판단",\
  "scenarios":{"1M":{"base":{"prob":0.5,"low":가격,"high":가격},\
 "bull":{"prob":0.3,"low":가격,"high":가격},"bear":{"prob":0.2,"low":가격,"high":가격}},\
 "3M":{...},"6M":{...}},\
  "consensus_strength":"high"|"medium"|"low",\
  "what_missing":"반대 의견 강조",\
  "key_levels":{"support":가격,"resistance":가격,"stop_loss":가격},\
- "next_review_trigger":"재검토 트리거 조건"}"""
+ "next_review_trigger":"재검토 트리거 조건",\
+ "evidence_refs":["layer3.rsi=72","layer1.f_score=8"],\
+ "invalidation_conditions":["RSI 40 하회","분기 EPS 미스"]}"""
 
 
 # ──────────────────────────────────────────
@@ -94,6 +103,7 @@ def run_deepdive_debate(
     entry, layers: dict, current_price: float, daily_change: float,
     timeout: int = 600, model: str = "opus",
     pair_results: list | None = None,
+    portfolio_context: dict | None = None,
 ) -> CLIDebateResult | None:
     """3라운드 CLI 토론 실행. 5회 순차 호출.
 
@@ -104,6 +114,7 @@ def run_deepdive_debate(
     context = build_stock_context(
         entry, layers, current_price, daily_change,
         pair_results=pair_results,
+        portfolio_context=portfolio_context,
     )
     r1_prompt = _build_r1_prompt(context)
     rounds: list[DebateRound] = []

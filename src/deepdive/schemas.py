@@ -98,11 +98,19 @@ class MacroSensitivity(BaseModel, frozen=True):
 class AIResult(BaseModel, frozen=True):
     """AI 분석 결과."""
 
-    action_grade: str   # HOLD/ADD/TRIM/EXIT
-    conviction: int     # 1-10
-    uncertainty: str    # low/medium/high
+    action_grade: str                            # HOLD/ADD/TRIM/EXIT
+    conviction: int                              # 1-10
+    uncertainty: str                             # low/medium/high
     reasoning: str
-    what_missing: str | None
+    what_missing: str | None = None
+
+    # Phase 4: 근거 추적 + 실행 가이드 힌트 (Synthesizer 구조화 출력 복구)
+    support_price: float | None = None           # 기술적 지지선 (AI 관찰)
+    resistance_price: float | None = None        # 기술적 저항선 (AI 관찰)
+    stop_loss: float | None = None               # AI 제시 손절가
+    next_review_trigger: str | None = None       # 재검토 트리거 조건
+    evidence_refs: tuple[str, ...] = ()          # ["layer3.rsi=72", ...]
+    invalidation_conditions: tuple[str, ...] = ()  # 논지가 깨지는 조건
 
 
 class ScenarioForecast(BaseModel, frozen=True):

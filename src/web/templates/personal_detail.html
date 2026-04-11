@@ -12,8 +12,8 @@
         <a href="/personal/{{ ticker }}/history" class="text-indigo-500 hover:underline">히스토리 보기 &rarr;</a>
     </div>
 
-    <!-- 헤더 -->
-    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-6 mb-6">
+    <!-- Hero 카드 -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-6 mb-4">
         <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
                 <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ ticker }}
@@ -26,7 +26,7 @@
                     {% endif %}
                 </div>
             </div>
-            <div class="flex items-center gap-3">
+            <div class="flex items-center gap-4">
                 {% if report %}
                 {% if report.action_grade == 'ADD' %}
                 <span class="px-4 py-1.5 rounded-full text-sm font-bold bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">ADD</span>
@@ -41,6 +41,21 @@
                     <div class="text-xs text-gray-500 dark:text-gray-400">확신도</div>
                     <div class="text-lg font-bold text-gray-900 dark:text-white">{{ report.conviction }}/10</div>
                 </div>
+                {% if execution_guide and execution_guide.expected_value_pct and execution_guide.expected_value_pct.get('3M') is not none %}
+                <div class="text-center">
+                    <div class="text-xs text-gray-500 dark:text-gray-400">EV 3M</div>
+                    <div class="text-lg font-bold {% if execution_guide.expected_value_pct['3M'] >= 0 %}text-green-600 dark:text-green-400{% else %}text-red-600 dark:text-red-400{% endif %}">{{ "%+.1f"|format(execution_guide.expected_value_pct['3M']) }}%</div>
+                </div>
+                {% endif %}
+                {% if execution_guide and execution_guide.risk_reward_ratio is not none %}
+                <div class="text-center">
+                    <div class="text-xs text-gray-500 dark:text-gray-400">R/R</div>
+                    <div class="text-lg font-bold
+                        {% if execution_guide.risk_reward_label == 'favorable' %}text-green-600 dark:text-green-400
+                        {% elif execution_guide.risk_reward_label == 'unfavorable' %}text-red-600 dark:text-red-400
+                        {% else %}text-gray-900 dark:text-white{% endif %}">{{ "%.1f"|format(execution_guide.risk_reward_ratio) }}</div>
+                </div>
+                {% endif %}
                 {% endif %}
             </div>
         </div>
@@ -54,13 +69,103 @@
         {% endif %}
     </div>
 
+    {% if execution_guide %}
+    <!-- 실행 가이드 카드 (Phase 5 핵심) -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border-2
+        {% if execution_guide.action_hint == 'now' %}border-green-400 dark:border-green-600
+        {% elif execution_guide.action_hint == 'avoid' or execution_guide.action_hint == 'sell' %}border-red-400 dark:border-red-600
+        {% elif execution_guide.action_hint == 'wait_pullback' %}border-yellow-400 dark:border-yellow-600
+        {% else %}border-gray-200 dark:border-gray-700{% endif %} p-5 mb-6">
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-bold text-gray-900 dark:text-white">실행 가이드</h2>
+            <span class="px-3 py-1 text-xs font-bold rounded-full
+                {% if execution_guide.action_hint == 'now' %}bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400
+                {% elif execution_guide.action_hint == 'avoid' %}bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400
+                {% elif execution_guide.action_hint == 'sell' %}bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400
+                {% elif execution_guide.action_hint == 'wait_pullback' %}bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400
+                {% else %}bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300{% endif %}">
+                {% if execution_guide.action_hint == 'now' %}지금 진입 가능
+                {% elif execution_guide.action_hint == 'wait_pullback' %}풀백 대기
+                {% elif execution_guide.action_hint == 'avoid' %}매수 회피
+                {% elif execution_guide.action_hint == 'sell' %}매도 신호
+                {% else %}관망{% endif %}
+            </span>
+        </div>
+
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <!-- Buy Zone -->
+            <div class="bg-gray-50 dark:bg-gray-900/40 rounded-lg p-3">
+                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">Buy Zone</div>
+                <div class="text-base font-bold text-gray-900 dark:text-white">
+                    ${{ "%.2f"|format(execution_guide.buy_zone_low) }} ~ ${{ "%.2f"|format(execution_guide.buy_zone_high) }}
+                </div>
+                <div class="text-xs mt-1
+                    {% if execution_guide.buy_zone_status == 'in_zone' %}text-green-600 dark:text-green-400
+                    {% elif execution_guide.buy_zone_status == 'wait' %}text-yellow-600 dark:text-yellow-400
+                    {% else %}text-gray-500{% endif %}">
+                    {% if execution_guide.buy_zone_status == 'in_zone' %}현재가 존 내
+                    {% elif execution_guide.buy_zone_status == 'wait' %}RSI 과매수 대기
+                    {% elif execution_guide.buy_zone_status == 'above_zone' %}존 위로 이탈
+                    {% elif execution_guide.buy_zone_status == 'below_zone' %}존 아래로 이탈
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Stop Loss -->
+            <div class="bg-red-50 dark:bg-red-900/20 rounded-lg p-3">
+                <div class="text-xs text-red-600 dark:text-red-400 mb-1">손절가</div>
+                <div class="text-base font-bold text-red-700 dark:text-red-300">
+                    ${{ "%.2f"|format(execution_guide.stop_loss) }}
+                </div>
+                <div class="text-xs mt-1 text-red-600 dark:text-red-400">
+                    {{ "%+.1f"|format(execution_guide.stop_loss_pct) }}% · {{ execution_guide.stop_loss_source }}
+                </div>
+            </div>
+
+            <!-- Targets -->
+            <div class="bg-green-50 dark:bg-green-900/20 rounded-lg p-3">
+                <div class="text-xs text-green-600 dark:text-green-400 mb-1">목표가 (확률가중)</div>
+                <div class="text-xs text-gray-700 dark:text-gray-300 space-y-0.5">
+                    {% if execution_guide.target_1m is not none %}<div>1M: <span class="font-semibold text-green-700 dark:text-green-300">${{ "%.2f"|format(execution_guide.target_1m) }}</span></div>{% endif %}
+                    {% if execution_guide.target_3m is not none %}<div>3M: <span class="font-semibold text-green-700 dark:text-green-300">${{ "%.2f"|format(execution_guide.target_3m) }}</span></div>{% endif %}
+                    {% if execution_guide.target_6m is not none %}<div>6M: <span class="font-semibold text-green-700 dark:text-green-300">${{ "%.2f"|format(execution_guide.target_6m) }}</span></div>{% endif %}
+                </div>
+            </div>
+
+            <!-- Position Size -->
+            <div class="bg-indigo-50 dark:bg-indigo-900/20 rounded-lg p-3">
+                <div class="text-xs text-indigo-600 dark:text-indigo-400 mb-1">제안 비중</div>
+                <div class="text-base font-bold text-indigo-700 dark:text-indigo-300">
+                    {{ "%.1f"|format(execution_guide.suggested_position_pct) }}%
+                </div>
+                <div class="text-xs mt-1 text-gray-500 dark:text-gray-400 leading-tight">
+                    {{ execution_guide.position_rationale }}
+                </div>
+            </div>
+        </div>
+
+        {% if execution_guide.portfolio_fit_warnings %}
+        <div class="mt-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3">
+            <div class="text-xs font-semibold text-red-700 dark:text-red-400 mb-1">포트폴리오 적합도 경고</div>
+            <ul class="text-xs text-red-800 dark:text-red-300 space-y-0.5">
+                {% for w in execution_guide.portfolio_fit_warnings %}
+                <li>• {{ w }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
     {% if report %}
     <!-- 탭 바 -->
     <div class="border-b border-gray-200 dark:border-gray-700 mb-6">
         <nav class="flex gap-6 text-sm font-medium">
             <button onclick="showTab('summary')" id="tab-summary" class="tab-btn pb-3 border-b-2 border-indigo-500 text-indigo-600 dark:text-indigo-400">요약</button>
+            <button onclick="showTab('evidence')" id="tab-evidence" class="tab-btn pb-3 border-b-2 border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700">근거 추적</button>
             <button onclick="showTab('layers')" id="tab-layers" class="tab-btn pb-3 border-b-2 border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700">6레이어</button>
             <button onclick="showTab('scenarios')" id="tab-scenarios" class="tab-btn pb-3 border-b-2 border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700">시나리오</button>
+            <button onclick="showTab('pairs')" id="tab-pairs" class="tab-btn pb-3 border-b-2 border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700">페어</button>
             <button onclick="showTab('debate')" id="tab-debate" class="tab-btn pb-3 border-b-2 border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700">토론</button>
         </nav>
     </div>
@@ -69,12 +174,28 @@
     <div id="panel-summary" class="tab-panel">
         <div class="bg-gradient-to-r from-indigo-50 to-blue-50 dark:from-indigo-900/20 dark:to-blue-900/20 rounded-xl p-5 mb-4">
             <h3 class="text-sm font-semibold text-indigo-700 dark:text-indigo-300 mb-2">AI 종합 판단</h3>
-            <p class="text-gray-800 dark:text-gray-200">{{ report.ai_synthesis or '분석 결과 없음' }}</p>
+            <p class="text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{{ report.ai_synthesis or '분석 결과 없음' }}</p>
         </div>
         {% if report.what_missing %}
         <div class="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl p-4 mb-4">
             <h4 class="text-sm font-semibold text-amber-700 dark:text-amber-400 mb-1">놓치고 있을 수 있는 것</h4>
             <p class="text-sm text-amber-800 dark:text-amber-300">{{ report.what_missing }}</p>
+        </div>
+        {% endif %}
+        {% if next_review_trigger %}
+        <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4 mb-4">
+            <h4 class="text-sm font-semibold text-blue-700 dark:text-blue-400 mb-1">재검토 트리거</h4>
+            <p class="text-sm text-blue-800 dark:text-blue-300">{{ next_review_trigger }}</p>
+        </div>
+        {% endif %}
+        {% if invalidation_conditions %}
+        <div class="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-xl p-4 mb-4">
+            <h4 class="text-sm font-semibold text-purple-700 dark:text-purple-400 mb-1">이 논지가 깨지는 조건</h4>
+            <ul class="text-sm text-purple-800 dark:text-purple-300 space-y-1">
+                {% for cond in invalidation_conditions %}
+                <li>• {{ cond }}</li>
+                {% endfor %}
+            </ul>
         </div>
         {% endif %}
         {% if report.consensus_strength %}
@@ -100,7 +221,31 @@
         {% endif %}
     </div>
 
-    <!-- 탭 2: 6레이어 -->
+    <!-- 탭 2: 근거 추적 -->
+    <div id="panel-evidence" class="tab-panel hidden">
+        {% if evidence_refs %}
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+            <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-3">AI가 참조한 데이터 포인트</h3>
+            <div class="space-y-2">
+                {% for ref in evidence_refs %}
+                {% set parts = ref.split('.', 1) %}
+                {% set layer_key = parts[0] if parts|length > 1 else '' %}
+                <div class="flex items-start gap-3 py-2 border-b border-gray-100 dark:border-gray-700 last:border-0">
+                    <span class="inline-block px-2 py-0.5 rounded text-xs font-mono bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300">{{ layer_key }}</span>
+                    <code class="text-sm text-gray-800 dark:text-gray-200 flex-1">{{ parts[1] if parts|length > 1 else ref }}</code>
+                    {% if layer_key.startswith('layer') %}
+                    <a href="#{{ layer_key }}" onclick="showTab('layers'); return false;" class="text-xs text-indigo-500 hover:underline">보기 &rarr;</a>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% else %}
+        <div class="text-center py-10 text-gray-400">근거 데이터 없음 (이전 버전 리포트)</div>
+        {% endif %}
+    </div>
+
+    <!-- 탭 3: 6레이어 -->
     <div id="panel-layers" class="tab-panel hidden">
         <div class="chart-md mb-6" id="radarChart"></div>
         {% set layer_info = [
@@ -114,7 +259,7 @@
         <div class="space-y-3">
         {% for key, label, grade_key in layer_info %}
             {% set ldata = layers.get(key, {}) if layers else {} %}
-            <details class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+            <details id="{{ key }}" class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
                 <summary class="flex justify-between items-center cursor-pointer">
                     <span class="font-medium text-gray-900 dark:text-white">{{ label }}</span>
                     {% if ldata %}
@@ -135,7 +280,7 @@
         </div>
     </div>
 
-    <!-- 탭 3: 시나리오 -->
+    <!-- 탭 4: 시나리오 -->
     <div id="panel-scenarios" class="tab-panel hidden">
         {% if forecasts %}
         <div class="chart-md mb-6" id="scenarioChart"></div>
@@ -166,7 +311,44 @@
         {% endif %}
     </div>
 
-    <!-- 탭 4: 토론 -->
+    <!-- 탭 5: 페어 비교 -->
+    <div id="panel-pairs" class="tab-panel hidden">
+        {% if pair_comparisons %}
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm text-left">
+                <thead class="text-xs text-gray-500 dark:text-gray-400 uppercase bg-gray-50 dark:bg-gray-800">
+                    <tr>
+                        <th class="px-4 py-2">Peer</th>
+                        <th class="px-4 py-2">시총비</th>
+                        <th class="px-4 py-2">60일 수익률</th>
+                        <th class="px-4 py-2">vs {{ ticker }}</th>
+                        <th class="px-4 py-2">PER</th>
+                        <th class="px-4 py-2">유사도</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for p in pair_comparisons %}
+                <tr class="border-b border-gray-100 dark:border-gray-700">
+                    <td class="px-4 py-2">
+                        <a href="/personal/{{ p.peer_ticker }}" class="font-medium text-indigo-600 dark:text-indigo-400 hover:underline">{{ p.peer_ticker }}</a>
+                        <div class="text-xs text-gray-500">{{ p.peer_name }}</div>
+                    </td>
+                    <td class="px-4 py-2">{{ "%.1f"|format(p.market_cap_ratio) }}x</td>
+                    <td class="px-4 py-2 {% if p.return_60d_peer >= 0 %}text-green-600{% else %}text-red-600{% endif %}">{{ "%+.1f"|format(p.return_60d_peer) }}%</td>
+                    <td class="px-4 py-2 {% if (p.return_60d_target - p.return_60d_peer) >= 0 %}text-green-600{% else %}text-red-600{% endif %}">{{ "%+.1f"|format(p.return_60d_target - p.return_60d_peer) }}%p</td>
+                    <td class="px-4 py-2">{% if p.per_peer %}{{ "%.1f"|format(p.per_peer) }} vs {{ "%.1f"|format(p.per_target) if p.per_target else '-' }}{% else %}-{% endif %}</td>
+                    <td class="px-4 py-2">{{ "%.2f"|format(p.similarity_score) }}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-center py-10 text-gray-400">페어 비교 데이터 없음</div>
+        {% endif %}
+    </div>
+
+    <!-- 탭 6: 토론 -->
     <div id="panel-debate" class="tab-panel hidden">
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
             <div class="border-2 border-green-200 dark:border-green-800 rounded-xl p-4">
